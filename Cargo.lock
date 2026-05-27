@@ -1503,6 +1503,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "staking"
+version = "0.1.0"
+dependencies = [
+ "amm",
+ "soroban-sdk",
+ "token",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

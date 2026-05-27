@@ -862,6 +862,7 @@ impl AmmPool {
         amount_in: i128,
         min_out: i128,
         deadline: u64,
+        referrer: Option<Address>,
     ) -> i128 {
         assert!(deadline >= env.ledger().timestamp(), "deadline exceeded");
         assert!(!Self::is_paused(env.clone()), "pool is paused");
@@ -970,7 +971,7 @@ impl AmmPool {
 
         env.events().publish(
             (Symbol::new(&env, "swap"), trader),
-            (token_in, amount_in, token_out, amount_out),
+            (token_in, amount_in, token_out, amount_out, referrer),
         );
 
         amount_out
@@ -1004,6 +1005,7 @@ impl AmmPool {
         amount_out: i128,
         max_in: i128,
         deadline: u64,
+        referrer: Option<Address>,
     ) -> i128 {
         assert!(deadline >= env.ledger().timestamp(), "deadline exceeded");
         assert!(!Self::is_paused(env.clone()), "pool is paused");
@@ -1095,7 +1097,7 @@ impl AmmPool {
 
         env.events().publish(
             (Symbol::new(&env, "swap"), trader),
-            (token_in, amount_in, token_out, amount_out),
+            (token_in, amount_in, token_out, amount_out, referrer),
         );
 
         amount_in
