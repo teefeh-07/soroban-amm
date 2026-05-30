@@ -606,7 +606,7 @@ impl AmmPool {
         }
 
         // Checkpoint TWAP before updating reserves.
-        Self::checkpoint_twap(&env);
+        let (reserve_a, reserve_b) = Self::checkpoint_twap(&env);
 
         let owned = Self::shares_of(env.clone(), provider.clone());
         if owned < shares {
@@ -617,8 +617,7 @@ impl AmmPool {
         let token_b: Address = env.storage().instance().get(&DataKey::TokenB).unwrap();
         let lp_token: Address = env.storage().instance().get(&DataKey::LpToken).unwrap();
 
-        let reserve_a = Self::get_reserve_a(env.clone());
-        let reserve_b = Self::get_reserve_b(env.clone());
+        
         let total_shares = Self::get_total_shares(env.clone());
 
         let out_a = shares * reserve_a / total_shares;
@@ -704,7 +703,7 @@ impl AmmPool {
         }
 
         // Checkpoint TWAP before updating reserves.
-        Self::checkpoint_twap(&env);
+        let (reserve_a, reserve_b) = Self::checkpoint_twap(&env);
 
         let owned = Self::shares_of(env.clone(), provider.clone());
         if owned < shares {
@@ -719,8 +718,6 @@ impl AmmPool {
             return Err(AmmError::InvalidToken);
         }
 
-        let reserve_a = Self::get_reserve_a(env.clone());
-        let reserve_b = Self::get_reserve_b(env.clone());
         let total_shares = Self::get_total_shares(env.clone());
 
         // Compute proportional withdrawal amounts.
@@ -1048,7 +1045,7 @@ impl AmmPool {
         }
 
         // Checkpoint TWAP before updating reserves.
-        Self::checkpoint_twap(&env);
+        let (reserve_a, reserve_b) = Self::checkpoint_twap(&env);
 
         let token_a: Address = env.storage().instance().get(&DataKey::TokenA).unwrap();
         let token_b: Address = env.storage().instance().get(&DataKey::TokenB).unwrap();
@@ -1091,8 +1088,7 @@ impl AmmPool {
         };
 
         // Update reserves.
-        let reserve_a = Self::get_reserve_a(env.clone());
-        let reserve_b = Self::get_reserve_b(env.clone());
+        
         if token_in == token_a {
             env.storage()
                 .instance()
@@ -1202,14 +1198,14 @@ impl AmmPool {
         }
 
         // Checkpoint TWAP before updating reserves.
-        Self::checkpoint_twap(&env);
+        let (reserve_a, reserve_b) = Self::checkpoint_twap(&env);
 
         let token_a: Address = env.storage().instance().get(&DataKey::TokenA).unwrap();
         let token_b: Address = env.storage().instance().get(&DataKey::TokenB).unwrap();
         let reserve = if token == token_a {
-            Self::get_reserve_a(env.clone())
+           reserve_a
         } else if token == token_b {
-            Self::get_reserve_b(env.clone())
+            reserve_b
         } else {
             return Err(AmmError::InvalidToken);
         };
