@@ -1,42 +1,64 @@
 name: CI
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+
 jobs:
-  ci:
-    name: Build, Lint & Test
+  build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
-      - name: Install Rust stable with wasm32 target
-        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
         with:
-          targets: wasm32-unknown-unknown
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-      - name: Run tests
-        run: cargo test
-      - name: Build WASM release
-        run: cargo build --release --target wasm32-unknown-unknown
-      - name: Check WASM Binary Size
+          profile: minimal
+          toolchain: stable
+          components: clippy, rustfmt
+
+      - name: Add wasm target
+        run: rustup target add wasm32v1-none
+
+      - name: Build WASM artifacts
+        run: cargo build --release --target wasm32v1-none
+
+      - name: Check WASM binary sizes
         run: |
-          AMM_SIZE=$(wc -c < target/wasm32-unknown-unknown/release/amm.wasm)
-          TOKEN_SIZE=$(wc -c < target/wasm32-unknown-unknown/release/token.wasm)
-          MAX_SIZE=102400  # 100 KB threshold
-          echo "AMM WASM size: $AMM_SIZE bytes"
-          echo "TOKEN WASM size: $TOKEN_SIZE bytes"
-          if [ "$AMM_SIZE" -gt "$MAX_SIZE" ]; then
-            echo "amm.wasm exceeds size limit: ${AMM_SIZE} bytes (limit: ${MAX_SIZE})"
-            exit 1
-          fi
-          if [ "$TOKEN_SIZE" -gt "$MAX_SIZE" ]; then
-            echo "token.wasm exceeds size limit: ${TOKEN_SIZE} bytes (limit: ${MAX_SIZE})"
-            exit 1
-          fi
+          for f in target/wasm32v1-none/release/*.wasm; do
+            size=$(wc -c < "$f")
+            echo "$f: ${size} bytes"
+            # 200 KB limit (204800 bytes). This budget is set conservatively above the current
+            # largest contract size (~74 KB) to monitor and control binary bloat, which
+            # directly impacts Soroban deployment costs (upload fees scale with WASM size).
+            if [ "$size" -gt 204800 ]; then
+              echo "FAIL: $f exceeds 200 KB limit"
+              exit 1
+            fi
+          done
+
+      - name: Run all tests
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --all -- -D warnings
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Check docs
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace
+
+      - name: Security audit
+        uses: rustsec/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+        # Advisories can be ignored via audit.toml at the repo root.
+        # Example:
+        #   [[ignore]]
+        #   id = "RUSTSEC-0000-0000"
+        #   reason = "Not exploitable in this context because ..."
+

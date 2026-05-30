@@ -260,6 +260,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "Locker"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "Name"
                             }
                           ]
@@ -874,6 +886,9 @@
             "data": {
               "vec": [
                 {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
@@ -886,6 +901,15 @@
                   "i128": {
                     "hi": 0,
                     "lo": 10001
+                  }
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
                   }
                 }
               ]
@@ -910,7 +934,10 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'invalid fee: 10001 is outside 0..=10_000' from contract function 'Symbol(obj#211)'"
+                  "string": "caught panic 'invalid fee_bps: 10001 is outside 0..=10_000' from contract function 'Symbol(obj#213)'"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
                 },
                 {
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
@@ -925,6 +952,15 @@
                   "i128": {
                     "hi": 0,
                     "lo": 10001
+                  }
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
                   }
                 }
               ]
@@ -987,6 +1023,9 @@
                 {
                   "vec": [
                     {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                    },
+                    {
                       "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                     },
                     {
@@ -999,6 +1038,15 @@
                       "i128": {
                         "hi": 0,
                         "lo": 10001
+                      }
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                    },
+                    {
+                      "i128": {
+                        "hi": 0,
+                        "lo": 0
                       }
                     }
                   ]

@@ -123,6 +123,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -257,6 +260,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -342,6 +348,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -379,6 +388,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -680,7 +692,76 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "AccruedFeeA"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 0
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "AccruedFeeB"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 0
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Admin"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "FeeBps"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 30
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "FeeRecipient"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "FlashLoanFeeBps"
                             }
                           ]
                         },
@@ -719,6 +800,18 @@
                         "key": {
                           "vec": [
                             {
+                              "symbol": "Paused"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
                               "symbol": "PriceCumulativeA"
                             }
                           ]
@@ -735,6 +828,21 @@
                           "vec": [
                             {
                               "symbol": "PriceCumulativeB"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 0
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "ProtocolFeeBps"
                             }
                           ]
                         },
@@ -965,6 +1073,18 @@
                         },
                         "val": {
                           "u32": 7
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Locker"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                         }
                       },
                       {
@@ -2155,6 +2275,9 @@
             "data": {
               "vec": [
                 {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
                   "address": "CCABDO7UZXYE4W6GVSEGSNNZTKSLFQGKXXQTH6OX7M7GKZ4Z6CUJNGZN"
                 },
                 {
@@ -2167,6 +2290,15 @@
                   "i128": {
                     "hi": 0,
                     "lo": 30
+                  }
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
                   }
                 }
               ]
@@ -2415,6 +2547,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -2950,6 +3085,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -3310,12 +3448,50 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "admin"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "fee_bps"
                   },
                   "val": {
                     "i128": {
                       "hi": 0,
                       "lo": 30
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "fee_recipient"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "flash_loan_fee_bps"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 30
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "protocol_fee_bps"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 0
                     }
                   }
                 },
@@ -3415,6 +3591,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -3834,6 +4013,9 @@
                     "hi": 0,
                     "lo": 0
                   }
+                },
+                {
+                  "u64": 18446744073709551615
                 }
               ]
             }
@@ -4256,12 +4438,50 @@
               "map": [
                 {
                   "key": {
+                    "symbol": "admin"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "fee_bps"
                   },
                   "val": {
                     "i128": {
                       "hi": 0,
                       "lo": 30
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "fee_recipient"
+                  },
+                  "val": {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "flash_loan_fee_bps"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 30
+                    }
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "protocol_fee_bps"
+                  },
+                  "val": {
+                    "i128": {
+                      "hi": 0,
+                      "lo": 0
                     }
                   }
                 },

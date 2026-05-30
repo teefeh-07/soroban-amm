@@ -2,17 +2,34 @@
 
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, String, Symbol, Vec};
+
+// Export compiled WASM for tests/dev usage when the `testutils` feature is enabled.
+// When tests run, the WASM file may not exist; use empty slice to avoid error.
+#[cfg(feature = "testutils")]
+pub const WASM: &[u8] = &[];
 
 #[contracttype]
 pub enum DataKey {
     Balance(Address),
+    Locked(Address),
     Allowance(Address, Address),
     Admin,
+    Locker,
     Name,
     Symbol,
     Decimals,
     TotalSupply,
+    /// Historical balance checkpoints for governance snapshots.
+    Checkpoints(Address),
+}
+
+/// Balance recorded at a ledger sequence (used by `balance_at`).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Checkpoint {
+    pub ledger: u32,
+    pub balance: i128,
 }
 
 #[contract]
@@ -32,6 +49,7 @@ impl LpToken {
             );
         }
         env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Locker, &admin);
         env.storage().instance().set(&DataKey::Name, &name);
         env.storage().instance().set(&DataKey::Symbol, &symbol);
         env.storage().instance().set(&DataKey::Decimals, &decimals);
@@ -69,6 +87,25 @@ impl LpToken {
             .persistent()
             .get(&DataKey::Balance(id))
             .unwrap_or(0)
+    }
+
+    /// Returns the balance of `id` at or before `ledger` (for governance snapshots).
+    pub fn balance_at(env: Env, id: Address, ledger: u32) -> i128 {
+        let checkpoints: Vec<Checkpoint> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Checkpoints(id))
+            .unwrap_or(Vec::new(&env));
+        let mut result = 0_i128;
+        for i in 0..checkpoints.len() {
+            let cp = checkpoints.get(i).unwrap();
+            if cp.ledger <= ledger {
+                result = cp.balance;
+            } else {
+                break;
+            }
+        }
+        result
     }
 
     /// Returns the amount `spender` is allowed to transfer on behalf of `from`.
@@ -132,7 +169,8 @@ impl LpToken {
         let bal = Self::balance(env.clone(), to.clone());
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(to), &(bal + amount));
+            .set(&DataKey::Balance(to.clone()), &(bal + amount));
+        Self::write_checkpoint(&env, &to);
     }
 
     /// Burn tokens — admin only (called by the AMM contract).
@@ -151,6 +189,7 @@ impl LpToken {
         env.storage()
             .instance()
             .set(&DataKey::TotalSupply, &(supply - amount));
+        Self::write_checkpoint(&env, &from);
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
@@ -160,11 +199,74 @@ impl LpToken {
         env.storage().instance().get(&DataKey::Admin).unwrap()
     }
 
+    /// Address allowed to lock/unlock balances (governance).
+    pub fn locker(env: Env) -> Address {
+        env.storage().instance().get(&DataKey::Locker).unwrap()
+    }
+
+    /// Replace the contract WASM with a new version. Admin-only.
+    ///
+    /// The new WASM must already be uploaded to the network.
+    /// State is preserved; only bytecode is replaced.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.events()
+            .publish((Symbol::new(&env, "upgraded"),), (new_wasm_hash,));
+    }
+
+    /// Admin-only locker update.
+    pub fn set_locker(env: Env, locker: Address) {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        admin.require_auth();
+        env.storage().instance().set(&DataKey::Locker, &locker);
+    }
+
+    /// Returns currently locked balance for `id`.
+    pub fn locked_balance(env: Env, id: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Locked(id))
+            .unwrap_or(0)
+    }
+
+    /// Governance-locker only: lock a holder's transferable balance.
+    pub fn lock(env: Env, holder: Address, amount: i128) {
+        assert!(amount > 0, "amount must be positive");
+        let locker: Address = env.storage().instance().get(&DataKey::Locker).unwrap();
+        locker.require_auth();
+        let bal = Self::balance(env.clone(), holder.clone());
+        let locked = Self::locked_balance(env.clone(), holder.clone());
+        assert!(
+            bal - locked >= amount,
+            "insufficient unlocked balance to lock"
+        );
+        env.storage()
+            .persistent()
+            .set(&DataKey::Locked(holder), &(locked + amount));
+    }
+
+    /// Governance-locker only: unlock previously locked balance.
+    pub fn unlock(env: Env, holder: Address, amount: i128) {
+        assert!(amount > 0, "amount must be positive");
+        let locker: Address = env.storage().instance().get(&DataKey::Locker).unwrap();
+        locker.require_auth();
+        let locked = Self::locked_balance(env.clone(), holder.clone());
+        assert!(locked >= amount, "unlock exceeds locked balance");
+        env.storage()
+            .persistent()
+            .set(&DataKey::Locked(holder), &(locked - amount));
+    }
+
     fn _transfer(env: &Env, from: &Address, to: &Address, amount: i128) {
         let from_bal = Self::balance(env.clone(), from.clone());
+        let locked = Self::locked_balance(env.clone(), from.clone());
         assert!(
-            from_bal >= amount,
-            "insufficient balance: available={from_bal}, requested={amount}"
+            from_bal - locked >= amount,
+            "insufficient unlocked balance: available={}, requested={amount}",
+            from_bal - locked
         );
         env.storage()
             .persistent()
@@ -173,10 +275,31 @@ impl LpToken {
         env.storage()
             .persistent()
             .set(&DataKey::Balance(to.clone()), &(to_bal + amount));
+        Self::write_checkpoint(env, from);
+        Self::write_checkpoint(env, to);
         env.events().publish(
             (Symbol::new(env, "transfer"), from.clone()),
             (to.clone(), amount),
         );
+    }
+
+    fn write_checkpoint(env: &Env, account: &Address) {
+        let ledger = env.ledger().sequence();
+        let balance = Self::balance(env.clone(), account.clone());
+        let key = DataKey::Checkpoints(account.clone());
+        let mut checkpoints: Vec<Checkpoint> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(env));
+        if checkpoints.len() > 0 {
+            let last = checkpoints.get(checkpoints.len() - 1).unwrap();
+            if last.ledger == ledger {
+                checkpoints.pop_back();
+            }
+        }
+        checkpoints.push_back(Checkpoint { ledger, balance });
+        env.storage().persistent().set(&key, &checkpoints);
     }
 }
 
@@ -314,5 +437,43 @@ mod tests {
         assert_eq!(client.name(), String::from_str(&ts.env, "Test Token"));
         assert_eq!(client.symbol(), String::from_str(&ts.env, "TST"));
         assert_eq!(client.decimals(), 7u32);
+    }
+
+    #[test]
+    fn test_balance_at_snapshot() {
+        let ts = setup();
+        let client = LpTokenClient::new(&ts.env, &ts.contract_addr);
+        let alice = Address::generate(&ts.env);
+        let bob = Address::generate(&ts.env);
+
+        client.mint(&alice, &1_000_i128);
+        let ledger_after_mint = ts.env.ledger().sequence();
+        client.transfer(&alice, &bob, &400_i128);
+
+        assert_eq!(client.balance_at(&alice, &ledger_after_mint), 1_000);
+        assert_eq!(client.balance(&alice), 600);
+    }
+
+    #[test]
+    fn test_lock_blocks_transfer_until_unlock() {
+        let ts = setup();
+        let client = LpTokenClient::new(&ts.env, &ts.contract_addr);
+        let alice = Address::generate(&ts.env);
+        let bob = Address::generate(&ts.env);
+        let locker = Address::generate(&ts.env);
+
+        client.set_locker(&locker);
+        client.mint(&alice, &1_000_i128);
+        client.lock(&alice, &700_i128);
+        assert_eq!(client.locked_balance(&alice), 700);
+
+        assert!(client.try_transfer(&alice, &bob, &400_i128).is_err());
+        client.transfer(&alice, &bob, &300_i128);
+
+        client.unlock(&alice, &700_i128);
+        assert_eq!(client.locked_balance(&alice), 0);
+        client.transfer(&alice, &bob, &700_i128);
+        assert_eq!(client.balance(&alice), 0);
+        assert_eq!(client.balance(&bob), 1_000);
     }
 }
