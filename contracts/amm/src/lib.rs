@@ -26,6 +26,20 @@ use soroban_sdk::token::Client as SepTokenClient;
 ///
 /// We define this locally rather than importing the `token` crate to avoid
 /// duplicate symbol errors during the WASM build.
+/// Oracle aggregator price quote (#318).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AggregatedPrice {
+    pub price: i128,
+    pub confidence: u32,
+}
+
+#[contractclient(name = "OracleAggregatorClient")]
+pub trait OracleAggregatorInterface {
+    /// Returns median price + confidence; confidence 0 when sources are stale.
+    fn get_price_safe(env: Env, token_a: Address, token_b: Address) -> AggregatedPrice;
+}
+
 #[soroban_sdk::contractclient(name = "LpTokenClient")]
 pub trait LpTokenInterface {
     fn initialize(
@@ -72,6 +86,8 @@ pub enum AmmError {
     /// `min_received` threshold permitted. The pool received fewer tokens
     /// than requested; the call is reverted to protect the caller.
     FotSlippage          = 16,
+    /// Spot price deviated beyond the configured oracle tolerance.
+    OracleDeviationExceeded = 17,
 }
 
 // ── Storage keys ─────────────────────────────────────────────────────────────
@@ -88,8 +104,6 @@ pub enum DataKey {
     PriceCumulativeB,
     LiquidityCumulative,
     LastTimestamp,
-   Shares(Address),
-    Admin,
     Shares(Address),
     // Emergency withdrawal storage
     EmergencyWithdrawTimestamp,
@@ -104,8 +118,24 @@ pub enum DataKey {
     AccruedFeeA,
     AccruedFeeB,
     FlashLoanFeeBps,
-    Paused,
-    PendingAdmin,
+
+    // Issue #292: LP fee rebate — fraction of protocol fee redistributed to LPs.
+    /// Basis points of the protocol fee that are rebated back into LP reserves
+    /// (e.g. 5_000 = 50 % of the protocol fee goes back to LPs).
+    LpRebateBps,
+
+    // Issue #293: k-of-n multisig guard for emergency operations.
+    /// Vec<Address> of multisig signers.
+    MultisigSigners,
+    /// Required quorum (k in k-of-n).
+    MultisigQuorum,
+    /// Pending emergency-withdraw proposal: (recipient, Vec<Address> approvals).
+    MultisigProposalRecipient,
+    MultisigProposalApprovals,
+
+    // Issue #294: minimum liquidity lock — LP tokens permanently locked on first deposit.
+    /// Whether the minimum liquidity has already been locked (set on first deposit).
+    MinLiquidityLocked,
 
     // Pause / reentrancy
     Paused,
@@ -133,6 +163,11 @@ pub enum DataKey {
 
     /// Ledger sequence number at which `CircuitBreakerLastPrice` was captured.
     CircuitBreakerLastSeqno,
+
+    /// Optional oracle aggregator for pre-swap deviation checks (#318).
+    OracleAggregator,
+    /// Max allowed spot-vs-oracle deviation in basis points (e.g. 500 = 5 %).
+    MaxOracleDeviationBps,
 }
 
 // ── Pool info returned by `get_info` ─────────────────────────────────────────
@@ -150,6 +185,24 @@ pub struct PoolInfo {
     pub admin: Address,
     pub fee_recipient: Address,
     pub protocol_fee_bps: i128,
+    /// Issue #292: fraction of protocol fee rebated back to LP reserves (bps).
+    pub lp_rebate_bps: i128,
+}
+
+/// Issue #293: multisig configuration returned by `get_multisig_config`.
+#[contracttype]
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultisigConfig {
+    pub signers: soroban_sdk::Vec<Address>,
+    pub quorum: u32,
+}
+
+/// Issue #293: pending emergency-withdraw proposal.
+#[contracttype]
+#[derive(Debug, Clone, PartialEq)]
+pub struct MultisigProposal {
+    pub recipient: Address,
+    pub approvals: soroban_sdk::Vec<Address>,
 }
 
 #[contractclient(name = "FlashLoanReceiverClient")]
@@ -307,6 +360,15 @@ impl AmmPool {
             .set(&DataKey::LastTimestamp, &env.ledger().timestamp());
         env.storage().instance().set(&DataKey::Paused, &false);
         env.storage().instance().set(&DataKey::Locked, &false);
+        // Issue #292: LP rebate disabled by default.
+        env.storage().instance().set(&DataKey::LpRebateBps, &0_i128);
+        // Issue #293: multisig disabled by default (empty signers, quorum 0).
+        env.storage().instance().set(&DataKey::MultisigQuorum, &0_u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigSigners, &soroban_sdk::Vec::<Address>::new(&env));
+        // Issue #294: minimum liquidity not yet locked.
+        env.storage().instance().set(&DataKey::MinLiquidityLocked, &false);
         // Circuit breaker: default threshold 50 % (5 000 bps), cooldown 600 s.
         env.storage()
             .instance()
@@ -323,6 +385,46 @@ impl AmmPool {
         env.storage()
             .instance()
             .set(&DataKey::CircuitBreakerLastSeqno, &0_u32);
+        // Oracle deviation guard (#318): disabled until admin configures an oracle.
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleAggregator, &Option::<Address>::None);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxOracleDeviationBps, &500_i128);
+        Ok(())
+    }
+
+    /// Admin: attach or remove the oracle aggregator used for swap deviation checks.
+    pub fn set_oracle(env: Env, admin: Address, oracle: Option<Address>) -> Result<(), AmmError> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != stored_admin {
+            return Err(AmmError::Unauthorized);
+        }
+        admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::OracleAggregator, &oracle);
+        Ok(())
+    }
+
+    /// Admin: max spot-vs-oracle deviation in basis points before swaps revert.
+    pub fn set_max_oracle_deviation_bps(
+        env: Env,
+        admin: Address,
+        max_deviation_bps: i128,
+    ) -> Result<(), AmmError> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != stored_admin {
+            return Err(AmmError::Unauthorized);
+        }
+        admin.require_auth();
+        if !(0..=10_000).contains(&max_deviation_bps) {
+            return Err(AmmError::InvalidFeeBps);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxOracleDeviationBps, &max_deviation_bps);
         Ok(())
     }
 
@@ -578,8 +680,6 @@ impl AmmPool {
 
         Ok(())
     }
-        Ok(())
-    }
 
     /// Update the protocol fee configuration. Admin-only.
     ///
@@ -617,7 +717,226 @@ impl AmmPool {
         (recipient, bps)
     }
 
-    /// Validate that a fee value is within the allowed range [0, 10_000].
+    // ── Issue #292: LP fee rebate ─────────────────────────────────────────────
+
+    /// Set the fraction of the protocol fee rebated back into LP reserves.
+    ///
+    /// `lp_rebate_bps` is a fraction of `protocol_fee_bps`
+    /// (e.g. 5_000 = 50 % of the protocol cut goes back to LPs).
+    /// Must be in `[0, 10_000]`. Admin-only.
+    pub fn set_lp_rebate(env: Env, admin: Address, lp_rebate_bps: i128) -> Result<(), AmmError> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != stored_admin {
+            return Err(AmmError::Unauthorized);
+        }
+        admin.require_auth();
+        if !(0..=10_000).contains(&lp_rebate_bps) {
+            return Err(AmmError::InvalidFeeBps);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::LpRebateBps, &lp_rebate_bps);
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "lp_rebate_set"), admin), (lp_rebate_bps,));
+        Ok(())
+    }
+
+    /// Return the current LP rebate rate in basis points.
+    pub fn get_lp_rebate(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::LpRebateBps)
+            .unwrap_or(0)
+    }
+
+    // ── Issue #293: k-of-n multisig emergency guard ───────────────────────────
+
+    /// Configure the k-of-n multisig guard for emergency operations.
+    ///
+    /// Once set, `emergency_withdraw` requires `quorum` approvals from `signers`
+    /// before funds can be moved. Admin-only.
+    /// Set `quorum` to 0 to disable the multisig guard (single-admin mode).
+    pub fn set_multisig(
+        env: Env,
+        admin: Address,
+        signers: soroban_sdk::Vec<Address>,
+        quorum: u32,
+    ) -> Result<(), AmmError> {
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        if admin != stored_admin {
+            return Err(AmmError::Unauthorized);
+        }
+        admin.require_auth();
+        if quorum > 0 && (quorum as usize) > signers.len() as usize {
+            return Err(AmmError::InvalidFeeBps);
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigSigners, &signers);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigQuorum, &quorum);
+        // Clear any pending proposal when config changes.
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalRecipient, &Option::<Address>::None);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalApprovals, &soroban_sdk::Vec::<Address>::new(&env));
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "multisig_set"), admin), (quorum,));
+        Ok(())
+    }
+
+    /// Return the current multisig configuration.
+    pub fn get_multisig_config(env: Env) -> MultisigConfig {
+        MultisigConfig {
+            signers: env
+                .storage()
+                .instance()
+                .get(&DataKey::MultisigSigners)
+                .unwrap_or_else(|| soroban_sdk::Vec::new(&env)),
+            quorum: env
+                .storage()
+                .instance()
+                .get(&DataKey::MultisigQuorum)
+                .unwrap_or(0),
+        }
+    }
+
+    /// Propose an emergency withdrawal (multisig mode).
+    ///
+    /// Any configured signer may call this to initiate or co-sign a proposal.
+    /// Once `quorum` approvals are collected the proposal can be executed via
+    /// `execute_multisig_emergency_withdraw`.
+    pub fn propose_emergency_withdraw(
+        env: Env,
+        signer: Address,
+        recipient: Address,
+    ) -> Result<(), AmmError> {
+        signer.require_auth();
+        let quorum: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigQuorum)
+            .unwrap_or(0);
+        if quorum == 0 {
+            return Err(AmmError::Unauthorized); // use emergency_withdraw directly
+        }
+        let signers: soroban_sdk::Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigSigners)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&env));
+        if !signers.contains(&signer) {
+            return Err(AmmError::Unauthorized);
+        }
+        // Reset approvals if recipient changed.
+        let current_recipient: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalRecipient)
+            .unwrap_or(None);
+        let mut approvals: soroban_sdk::Vec<Address> =
+            if current_recipient.as_ref() == Some(&recipient) {
+                env.storage()
+                    .instance()
+                    .get(&DataKey::MultisigProposalApprovals)
+                    .unwrap_or_else(|| soroban_sdk::Vec::new(&env))
+            } else {
+                soroban_sdk::Vec::new(&env)
+            };
+        if !approvals.contains(&signer) {
+            approvals.push_back(signer.clone());
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalRecipient, &Some(recipient.clone()));
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalApprovals, &approvals);
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "ms_proposed"), signer), (recipient, approvals.len()));
+        Ok(())
+    }
+
+    /// Return the current pending multisig proposal, if any.
+    pub fn get_multisig_proposal(env: Env) -> Option<MultisigProposal> {
+        let recipient: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalRecipient)
+            .unwrap_or(None);
+        recipient.map(|r| MultisigProposal {
+            recipient: r,
+            approvals: env
+                .storage()
+                .instance()
+                .get(&DataKey::MultisigProposalApprovals)
+                .unwrap_or_else(|| soroban_sdk::Vec::new(&env)),
+        })
+    }
+
+    /// Execute the pending multisig emergency withdrawal once quorum is reached.
+    ///
+    /// Any signer may call this after enough approvals have been collected.
+    pub fn execute_multisig_emergency_withdraw(
+        env: Env,
+        signer: Address,
+    ) -> Result<(), AmmError> {
+        signer.require_auth();
+        let quorum: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigQuorum)
+            .unwrap_or(0);
+        if quorum == 0 {
+            return Err(AmmError::Unauthorized);
+        }
+        let signers: soroban_sdk::Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigSigners)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&env));
+        if !signers.contains(&signer) {
+            return Err(AmmError::Unauthorized);
+        }
+        let recipient: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalRecipient)
+            .unwrap_or(None);
+        let to = recipient.ok_or(AmmError::NoPendingAdmin)?;
+        let approvals: soroban_sdk::Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MultisigProposalApprovals)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(&env));
+        if (approvals.len() as u32) < quorum {
+            return Err(AmmError::InsufficientShares);
+        }
+        let token_a: Address = env.storage().instance().get(&DataKey::TokenA).unwrap();
+        let token_b: Address = env.storage().instance().get(&DataKey::TokenB).unwrap();
+        let reserve_a = Self::get_reserve_a(env.clone());
+        let reserve_b = Self::get_reserve_b(env.clone());
+        if reserve_a > 0 {
+            SepTokenClient::new(&env, &token_a)
+                .transfer(&env.current_contract_address(), &to, &reserve_a);
+        }
+        if reserve_b > 0 {
+            SepTokenClient::new(&env, &token_b)
+                .transfer(&env.current_contract_address(), &to, &reserve_b);
+        }
+        env.storage().instance().set(&DataKey::ReserveA, &0_i128);
+        env.storage().instance().set(&DataKey::ReserveB, &0_i128);
+        // Clear proposal.
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalRecipient, &Option::<Address>::None);
+        env.storage()
+            .instance()
+            .set(&DataKey::MultisigProposalApprovals, &soroban_sdk::Vec::<Address>::new(&env));
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "ms_ew"), signer), (to, reserve_a, reserve_b));
+        Ok(())
+    }
+
     /// Shared by initialize, update_fee, and set_protocol_fee.
     fn validate_fee_bps(fee_bps: i128) -> Result<(), AmmError> {
         if !(0..=10_000).contains(&fee_bps) {
@@ -916,7 +1235,25 @@ impl AmmPool {
         if shares <= 0 {
             return Err(AmmError::ZeroAmount);
         }
-        if shares < min_shares {
+
+        // Issue #294: on the very first deposit, permanently lock MINIMUM_LIQUIDITY
+        // LP tokens to the zero address so the pool can never be fully drained.
+        const MINIMUM_LIQUIDITY: i128 = 1_000;
+        let already_locked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinLiquidityLocked)
+            .unwrap_or(false);
+        let (shares_to_provider, shares_locked) = if total_shares == 0 && !already_locked {
+            if shares <= MINIMUM_LIQUIDITY {
+                return Err(AmmError::InsufficientShares);
+            }
+            (shares - MINIMUM_LIQUIDITY, MINIMUM_LIQUIDITY)
+        } else {
+            (shares, 0)
+        };
+
+        if shares_to_provider < min_shares {
             return Err(AmmError::SlippageExceeded);
         }
 
@@ -927,6 +1264,7 @@ impl AmmPool {
         client_b.transfer(&provider, &env.current_contract_address(), &amount_b);
 
         // Update reserves.
+        let total_minted = shares_to_provider + shares_locked;
         env.storage()
             .instance()
             .set(&DataKey::ReserveA, &(reserve_a + amount_a));
@@ -935,15 +1273,22 @@ impl AmmPool {
             .set(&DataKey::ReserveB, &(reserve_b + amount_b));
         env.storage()
             .instance()
-            .set(&DataKey::TotalShares, &(total_shares + shares));
+            .set(&DataKey::TotalShares, &(total_shares + total_minted));
 
         // Mint LP tokens.
         let lp_client = LpTokenClient::new(&env, &lp_token);
-        lp_client.mint(&provider, &shares);
+        // Issue #294: lock minimum liquidity to the contract address itself (zero-address equivalent).
+        if shares_locked > 0 {
+            lp_client.mint(&env.current_contract_address(), &shares_locked);
+            env.storage()
+                .instance()
+                .set(&DataKey::MinLiquidityLocked, &true);
+        }
+        lp_client.mint(&provider, &shares_to_provider);
 
-        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "add_liquidity"), provider), (amount_a, amount_b, shares));
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "add_liquidity"), provider), (amount_a, amount_b, shares_to_provider));
 
-        Ok(shares)
+        Ok(shares_to_provider)
     }
 
     /// Withdraw liquidity from the pool by burning LP shares.
@@ -1342,6 +1687,8 @@ impl AmmPool {
             return Err(AmmError::InsufficientLiquidity);
         }
 
+        Self::check_oracle_deviation(&env, &token_in, &token_out, amount_in, amount_out)?;
+
         // Transfer in.
         let client_in = SepTokenClient::new(&env, &token_in);
         client_in.transfer(&trader, &env.current_contract_address(), &amount_in);
@@ -1361,15 +1708,27 @@ impl AmmPool {
         } else {
             0
         };
-        // Update reserves (protocol fee held outside LP reserves).
+        // Issue #292: LP rebate — fraction of protocol fee returned to LP reserves.
+        let lp_rebate_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LpRebateBps)
+            .unwrap_or(0);
+        let lp_rebate = if protocol_fee > 0 && lp_rebate_bps > 0 {
+            protocol_fee * lp_rebate_bps / 10_000
+        } else {
+            0
+        };
+        let net_protocol_fee = protocol_fee - lp_rebate;
+        // Update reserves (net protocol fee held outside LP reserves; rebate stays in reserves).
         if token_in == token_a {
             env.storage()
                 .instance()
-                .set(&DataKey::ReserveA, &(reserve_in + amount_in - protocol_fee));
+                .set(&DataKey::ReserveA, &(reserve_in + amount_in - net_protocol_fee));
             env.storage()
                 .instance()
                 .set(&DataKey::ReserveB, &(reserve_out - amount_out));
-            if protocol_fee > 0 {
+            if net_protocol_fee > 0 {
                 let accrued: i128 = env
                     .storage()
                     .instance()
@@ -1377,16 +1736,16 @@ impl AmmPool {
                     .unwrap_or(0);
                 env.storage()
                     .instance()
-                    .set(&DataKey::AccruedFeeA, &(accrued + protocol_fee));
+                    .set(&DataKey::AccruedFeeA, &(accrued + net_protocol_fee));
             }
         } else {
             env.storage()
                 .instance()
-                .set(&DataKey::ReserveB, &(reserve_in + amount_in - protocol_fee));
+                .set(&DataKey::ReserveB, &(reserve_in + amount_in - net_protocol_fee));
             env.storage()
                 .instance()
                 .set(&DataKey::ReserveA, &(reserve_out - amount_out));
-            if protocol_fee > 0 {
+            if net_protocol_fee > 0 {
                 let accrued: i128 = env
                     .storage()
                     .instance()
@@ -1394,15 +1753,15 @@ impl AmmPool {
                     .unwrap_or(0);
                 env.storage()
                     .instance()
-                    .set(&DataKey::AccruedFeeB, &(accrued + protocol_fee));
+                    .set(&DataKey::AccruedFeeB, &(accrued + net_protocol_fee));
             }
         }
 
         env.events().publish(
-            (Symbol::new(&env, "swap"), trader),
-            (token_in, amount_in, token_out, amount_out),
+            (Symbol::new(&env, "swap"), trader.clone()),
+            (token_in.clone(), amount_in, token_out.clone(), amount_out),
         );
-        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "swap"), trader), (token_in, amount_in, token_out, amount_out, referrer));
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "swap"), trader), (token_in, amount_in, token_out, amount_out, None::<Address>));
 
         Ok(amount_out)
     }
@@ -1476,6 +1835,8 @@ impl AmmPool {
             return Err(AmmError::SlippageExceeded);
         }
 
+        Self::check_oracle_deviation(&env, &token_in, &token_out, amount_in, amount_out)?;
+
         // Transfer tokens.
         SepTokenClient::new(&env, &token_in).transfer(
             &trader,
@@ -1499,17 +1860,28 @@ impl AmmPool {
         } else {
             0
         };
+        // Issue #292: LP rebate — fraction of protocol fee returned to LP reserves.
+        let lp_rebate_bps: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LpRebateBps)
+            .unwrap_or(0);
+        let lp_rebate = if protocol_fee > 0 && lp_rebate_bps > 0 {
+            protocol_fee * lp_rebate_bps / 10_000
+        } else {
+            0
+        };
+        let net_protocol_fee = protocol_fee - lp_rebate;
 
-        // Update reserves.
-        
+        // Update reserves (net protocol fee held outside LP reserves; rebate stays in reserves).
         if token_in == token_a {
             env.storage()
                 .instance()
-                .set(&DataKey::ReserveA, &(reserve_a + amount_in - protocol_fee));
+                .set(&DataKey::ReserveA, &(reserve_a + amount_in - net_protocol_fee));
             env.storage()
                 .instance()
                 .set(&DataKey::ReserveB, &(reserve_b - amount_out));
-            if protocol_fee > 0 {
+            if net_protocol_fee > 0 {
                 let accrued: i128 = env
                     .storage()
                     .instance()
@@ -1517,16 +1889,16 @@ impl AmmPool {
                     .unwrap_or(0);
                 env.storage()
                     .instance()
-                    .set(&DataKey::AccruedFeeA, &(accrued + protocol_fee));
+                    .set(&DataKey::AccruedFeeA, &(accrued + net_protocol_fee));
             }
         } else {
             env.storage()
                 .instance()
-                .set(&DataKey::ReserveB, &(reserve_b + amount_in - protocol_fee));
+                .set(&DataKey::ReserveB, &(reserve_b + amount_in - net_protocol_fee));
             env.storage()
                 .instance()
                 .set(&DataKey::ReserveA, &(reserve_a - amount_out));
-            if protocol_fee > 0 {
+            if net_protocol_fee > 0 {
                 let accrued: i128 = env
                     .storage()
                     .instance()
@@ -1534,15 +1906,15 @@ impl AmmPool {
                     .unwrap_or(0);
                 env.storage()
                     .instance()
-                    .set(&DataKey::AccruedFeeB, &(accrued + protocol_fee));
+                    .set(&DataKey::AccruedFeeB, &(accrued + net_protocol_fee));
             }
         }
 
         env.events().publish(
-            (Symbol::new(&env, "swap"), trader),
-           (token_in, amount_in, token_out, amount_out),
+            (Symbol::new(&env, "swap"), trader.clone()),
+            (token_in.clone(), amount_in, token_out.clone(), amount_out),
         );
-        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "swap"), trader), (token_in, amount_in, token_out, amount_out, referrer));
+        soroban_amm_sdk::emit_versioned_event!(env, (Symbol::new(&env, "swap"), trader), (token_in, amount_in, token_out, amount_out, None::<Address>));
 
         Ok(amount_in)
     }
@@ -1878,6 +2250,11 @@ impl AmmPool {
                 .instance()
                 .get(&DataKey::ProtocolFeeBps)
                 .unwrap_or(0),
+            lp_rebate_bps: env
+                .storage()
+                .instance()
+                .get(&DataKey::LpRebateBps)
+                .unwrap_or(0),
         }
     }
 
@@ -2013,6 +2390,8 @@ impl AmmPool {
         if amount_out >= reserve_out {
             return Err(AmmError::InsufficientLiquidity);
         }
+
+        Self::check_oracle_deviation(&env, &token_in, &token_out, actual_received, amount_out)?;
 
         SepTokenClient::new(&env, &token_out).transfer(&pool, &trader, &amount_out);
 
@@ -2464,7 +2843,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_price_ratio() {
+    fn test_price_ratio(, &None) {
         let (env, admin, amm_addr, lp_addr, _) = setup();
 
         let (ta_client, ta_sac) = create_sac(&env, &admin);
@@ -2617,7 +2996,7 @@ pub(crate) mod tests {
         let out = amm.swap(&trader, &ts.tb_addr, &100_000_i128, &0_i128, &u64::MAX);
         assert!(out > 0 && out < 100_000);
 
-        let info = amm.get_info();
+        let info = amm.get_info(, &None);
         assert_eq!(info.reserve_b, 1_100_000);
         assert_eq!(info.reserve_a, 1_000_000 - out);
     }
@@ -2677,7 +3056,7 @@ pub(crate) mod tests {
         ta_sac.mint(&trader, &amount_in);
         let out = amm.swap(&trader, &ts.ta_addr, &amount_in, &0_i128, &u64::MAX);
 
-        let info = amm.get_info();
+        let info = amm.get_info(, &None);
         assert_eq!(info.reserve_a, 1_000_000 + amount_in);
         assert_eq!(info.reserve_b, 1_000_000 - out);
         // k must grow because fee stays in pool
@@ -2828,7 +3207,7 @@ pub(crate) mod tests {
 
         let trader = Address::generate(env);
         ta_sac.mint(&trader, &quoted_in);
-        let actual_in = amm.swap_exact_out(&trader, &ts.tb_addr, &want_out, &quoted_in, &u64::MAX);
+        let actual_in = amm.swap_exact_out(&trader, &ts.tb_addr, &want_out, &quoted_in, &u64::MAX, &None);
 
         assert_eq!(actual_in, quoted_in);
     }
@@ -2922,12 +3301,12 @@ pub(crate) mod tests {
         let lp1 = Address::generate(env);
         ta_sac.mint(&lp1, &1_000_000_i128);
         tb_sac.mint(&lp1, &1_000_000_i128);
-        let shares1 = amm.add_liquidity(&lp1, &1_000_000_i128, &1_000_000_i128, &0_i128, &u64::MAX);
+        let shares1 = amm.add_liquidity(&lp1, &1_000_000_i128, &1_000_000_i128, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         let lp2 = Address::generate(env);
         ta_sac.mint(&lp2, &500_000_i128);
         tb_sac.mint(&lp2, &500_000_i128);
-        let shares2 = amm.add_liquidity(&lp2, &500_000_i128, &500_000_i128, &0_i128, &u64::MAX);
+        let shares2 = amm.add_liquidity(&lp2, &500_000_i128, &500_000_i128, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         assert_eq!(amm.get_info().total_shares, shares1 + shares2);
 
@@ -2962,7 +3341,7 @@ pub(crate) mod tests {
 
         let trader = Address::generate(env);
         ta_sac.mint(&trader, &amount_in);
-        let actual = amm.swap(&trader, &ts.ta_addr, &amount_in, &0_i128, &u64::MAX);
+        let actual = amm.swap(&trader, &ts.ta_addr, &amount_in, &0_i128, &u64::MAX, &None);
 
         assert_eq!(quoted, actual);
     }
@@ -2980,7 +3359,7 @@ pub(crate) mod tests {
         let initial_amt = 1_000_000_i128;
         ta_sac.mint(&provider, &initial_amt);
         tb_sac.mint(&provider, &initial_amt);
-        amm.add_liquidity(&provider, &initial_amt, &initial_amt, &0_i128, &u64::MAX);
+        amm.add_liquidity(&provider, &initial_amt, &initial_amt, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         let info = amm.get_info();
         let initial_k = info.reserve_a * info.reserve_b;
@@ -2994,14 +3373,14 @@ pub(crate) mod tests {
             if i % 2 == 0 {
                 // A -> B
                 ta_sac.mint(&trader, &swap_amt);
-                amm.swap(&trader, &ts.ta_addr, &swap_amt, &0_i128, &u64::MAX);
+                amm.swap(&trader, &ts.ta_addr, &swap_amt, &0_i128, &u64::MAX, &None);
             } else {
                 // B -> A
                 tb_sac.mint(&trader, &swap_amt);
                 amm.swap(&trader, &ts.tb_addr, &swap_amt, &0_i128, &u64::MAX);
             }
 
-            let new_info = amm.get_info();
+            let new_info = amm.get_info(, &None);
             let new_k = new_info.reserve_a * new_info.reserve_b;
 
             // Invariant must hold: new_k >= initial_k
@@ -3130,7 +3509,7 @@ pub(crate) mod tests {
         let swap_event = events
             .iter()
             .find(|e| {
-                e.0 == amm.address && e.1 == (symbol_short!("swap"), trader.clone()).into_val(env)
+                e.0 == amm.address && e.1 == (symbol_short!("swap", &None), trader.clone()).into_val(env)
             })
             .expect("swap event not found");
 
@@ -3180,7 +3559,7 @@ pub(crate) mod tests {
         ta_sac.mint(&trader, &100_000_i128);
         amm.swap(&trader, &ts.ta_addr, &100_000_i128, &0_i128, &u64::MAX);
 
-        // Accumulators should have updated: price (1_000_000) * 10 seconds = 10_000_000
+        // Accumulators should have updated: price (1_000_000, &None) * 10 seconds = 10_000_000
         let (new_cum_a, new_cum_b, new_ts) = amm.get_price_cumulative();
         assert_eq!(new_ts, last_ts + 10);
         assert_eq!(new_cum_a, 10_000_000);
@@ -3198,7 +3577,7 @@ pub(crate) mod tests {
 
         // Perform another swap
         tb_sac.mint(&trader, &50_000_i128);
-        amm.swap(&trader, &ts.tb_addr, &50_000_i128, &0_i128, &u64::MAX);
+        amm.swap(&trader, &ts.tb_addr, &50_000_i128, &0_i128, &u64::MAX, &None);
 
         let (final_cum_a, final_cum_b, final_ts) = amm.get_price_cumulative();
         assert_eq!(final_ts, new_ts + 5);
@@ -3235,7 +3614,7 @@ pub(crate) mod tests {
         env.ledger().set_timestamp(last_ts + 10);
         let trader = Address::generate(env);
         ta_sac.mint(&trader, &10_000_i128);
-        amm.swap(&trader, &ts.ta_addr, &10_000_i128, &0_i128, &u64::MAX);
+        amm.swap(&trader, &ts.ta_addr, &10_000_i128, &0_i128, &u64::MAX, &None);
 
         let (new_cum, new_ts) = amm.get_liquidity_cumulative();
         assert_eq!(new_ts, last_ts + 10);
@@ -3284,7 +3663,7 @@ pub(crate) mod tests {
         ta_sac.mint(&trader, &amount_in);
         let out = amm.swap(&trader, &ts.ta_addr, &amount_in, &0_i128, &u64::MAX);
         // fee_bps=0 → no discount; pure constant-product formula
-        let expected = amount_in * 1_000_000 / (1_000_000 + amount_in);
+        let expected = amount_in * 1_000_000 / (1_000_000 + amount_in, &None);
         assert_eq!(out, expected);
     }
 
@@ -3389,7 +3768,7 @@ pub(crate) mod tests {
         ta_sac.mint(&lp2, &500_000_i128);
         tb_sac.mint(&lp2, &1_500_000_i128);
         let shares_minted =
-            amm.add_liquidity(&lp2, &500_000_i128, &1_500_000_i128, &0_i128, &u64::MAX);
+            amm.add_liquidity(&lp2, &500_000_i128, &1_500_000_i128, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         let shares_from_a = 500_000_i128 * initial_shares / 1_000_000;
         let shares_from_b = 1_500_000_i128 * initial_shares / 2_000_000;
@@ -3508,7 +3887,7 @@ pub(crate) mod tests {
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &large_amount);
         tb_sac.mint(&provider, &large_amount);
-        let shares = amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &u64::MAX);
+        let shares = amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         assert_eq!(shares, large_amount);
         let info = amm.get_info();
@@ -3528,7 +3907,7 @@ pub(crate) mod tests {
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &large_amount);
         tb_sac.mint(&provider, &large_amount);
-        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &u64::MAX);
+        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         // amount_in=10^9; numerator = 10^9*9970*4e18 ~ 4e31 < i128::MAX
         let trader = Address::generate(env);
@@ -3540,7 +3919,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_large_reserves_price_ratio_no_overflow() {
-        let ts = setup_pool(30);
+        let ts = setup_pool(30, &None);
         let env = &ts.env;
         let amm = AmmPoolClient::new(env, &ts.amm_addr);
         let ta_sac = StellarAssetClient::new(env, &ts.ta_addr);
@@ -3550,7 +3929,7 @@ pub(crate) mod tests {
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &large_amount);
         tb_sac.mint(&provider, &large_amount);
-        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &u64::MAX);
+        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         // price_ratio: reserve_b * 1_000_000 / reserve_a; 4e18 * 1e6 = 4e24 < i128::MAX
         let (price_a, price_b) = amm.price_ratio();
@@ -3570,7 +3949,7 @@ pub(crate) mod tests {
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &large_amount);
         tb_sac.mint(&provider, &large_amount);
-        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &u64::MAX);
+        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         // Forward: B for A
         let amount_in = 1_000_000_000_i128;
@@ -3602,7 +3981,7 @@ pub(crate) mod tests {
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &large_amount);
         tb_sac.mint(&provider, &large_amount);
-        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &u64::MAX);
+        amm.add_liquidity(&provider, &large_amount, &large_amount, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         // 4e18 * 1e17 * 10000 = 4e39 > i128::MAX
         amm.get_amount_in(&ts.ta_addr, &100_000_000_000_000_000_i128);
@@ -3623,7 +4002,7 @@ pub(crate) mod tests {
         let lp1 = Address::generate(env);
         ta_sac.mint(&lp1, &2_000_000_i128);
         tb_sac.mint(&lp1, &2_000_000_i128);
-        amm.add_liquidity(&lp1, &2_000_000_i128, &2_000_000_i128, &0_i128, &u64::MAX);
+        amm.add_liquidity(&lp1, &2_000_000_i128, &2_000_000_i128, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &1_000_000_i128);
@@ -3675,7 +4054,7 @@ pub(crate) mod tests {
         let lp1 = Address::generate(env);
         ta_sac.mint(&lp1, &2_000_000_i128);
         tb_sac.mint(&lp1, &2_000_000_i128);
-        amm.add_liquidity(&lp1, &2_000_000_i128, &2_000_000_i128, &0_i128, &u64::MAX);
+        amm.add_liquidity(&lp1, &2_000_000_i128, &2_000_000_i128, &0_i128, &0_i128, &0_i128, &u64::MAX);
 
         let provider = Address::generate(env);
         ta_sac.mint(&provider, &1_000_000_i128);
@@ -4533,9 +4912,10 @@ mod prop_tests {
             &1_000_000_i128,
             &1_000_000_i128,
             &0_i128,
+            &0_i128,
+            &0_i128,
             &u64::MAX,
         );
-       
 
         // --- Tiny swap: price_impact_bps should be 0 (rounds to 0 at 1 unit). ---
         let tiny = amm.simulate_swap(&ts.ta_addr, &1_i128);

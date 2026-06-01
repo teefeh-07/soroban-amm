@@ -295,7 +295,7 @@ Located in [contracts/concentrated_liquidity/src/lib.rs](contracts/concentrated_
 
 A V3-style tick-based AMM where liquidity providers specify a price range `[lower_tick, upper_tick]` for their capital. Only liquidity within the active price range earns fees, which allows far greater capital efficiency than a full-range V2 pool.
 
-**Status: in active development.** The position model and fee accounting are implemented. The tick registry, tick bitmap, sqrtPriceX96 math library, and swap engine are tracked in issues [#177](https://github.com/promisszn/soroban-amm/issues/177)–[#180](https://github.com/promisszn/soroban-amm/issues/180).
+**Status: in active development.** The position model, fee accounting, and in-place position modification flow are implemented. The tick registry, tick bitmap, sqrtPriceX96 math library, and swap engine are tracked in issues [#177](https://github.com/promisszn/soroban-amm/issues/177)–[#180](https://github.com/promisszn/soroban-amm/issues/180).
 
 #### How it differs from V2
 
@@ -313,6 +313,7 @@ A V3-style tick-based AMM where liquidity providers specify a price range `[lowe
 |---|---|
 | `initialize(token_a, token_b, fee_bps, initial_tick)` | One-time pool setup |
 | `mint_position(provider, lower_tick, upper_tick, amount_a_desired, amount_b_desired, min_a, min_b) → (a, b)` | Open or add to a tick-range position |
+| `modify_position(provider, lower_tick, upper_tick, liquidity_delta, min_a, min_b) → (a, b)` | Increase liquidity on an existing position in place |
 | `burn_position(provider, lower_tick, upper_tick, liquidity) → (a, b)` | Reduce or close a position and withdraw tokens |
 | `collect_fees(provider, lower_tick, upper_tick) → (a, b)` | Collect accrued fees for a position |
 | `get_position(provider, lower_tick, upper_tick) → Position` | Read a position's current state |

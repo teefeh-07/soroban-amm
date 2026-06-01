@@ -37,7 +37,11 @@ pub fn next_initialized_tick_within_word(env: &Env, tick: i32, lte: bool) -> (i3
 
     if lte {
         // Mask out all bits above bit_pos, then find the highest set bit.
-        let mask = if bit_pos == 127 { u128::MAX } else { (1u128 << (bit_pos + 1)) - 1 };
+        let mask = if bit_pos == 127 {
+            u128::MAX
+        } else {
+            (1u128 << (bit_pos + 1)) - 1
+        };
         let masked = word & mask;
         if masked == 0 {
             // No initialized tick at or below `tick` in this word.
@@ -49,7 +53,11 @@ pub fn next_initialized_tick_within_word(env: &Env, tick: i32, lte: bool) -> (i3
         (tick_index, true)
     } else {
         // Mask out all bits below bit_pos, then find the lowest set bit.
-        let mask = if bit_pos == 0 { u128::MAX } else { u128::MAX.wrapping_shl(bit_pos as u32) };
+        let mask = if bit_pos == 0 {
+            u128::MAX
+        } else {
+            u128::MAX.wrapping_shl(bit_pos as u32)
+        };
         let masked = word & mask;
         if masked == 0 {
             // No initialized tick at or above `tick` in this word.
@@ -79,8 +87,8 @@ fn tick_position(tick: i32) -> (i32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::Env;
     use crate::ConcentratedLiquidity;
+    use soroban_sdk::Env;
 
     fn env_with_contract() -> Env {
         let env = Env::default();

@@ -1,5 +1,5 @@
 [package]
-name = "staking"
+name = "pol_vesting"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,11 +8,9 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 testutils = ["soroban-sdk/testutils"]
-library = []
 
 [dependencies]
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-token = { path = "../token" }

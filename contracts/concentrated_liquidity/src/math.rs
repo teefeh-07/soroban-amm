@@ -77,15 +77,15 @@ pub fn tick_to_sqrt_price_x96(tick: i32) -> u128 {
         };
     }
 
-    apply_bit!(1,  0xfff97272373d413259a46990580e213a_u128);
-    apply_bit!(2,  0xfff2e50f5f656932ef12357cf3c7fdcc_u128);
-    apply_bit!(3,  0xffe5caca7e10e4e61c3624eaa0941cd0_u128);
-    apply_bit!(4,  0xffcb9843d60f6159c9db58835c926644_u128);
-    apply_bit!(5,  0xff973b41fa98c081472e6896dfb254c0_u128);
-    apply_bit!(6,  0xff2ea16466c96a3843ec78b326b52861_u128);
-    apply_bit!(7,  0xfe5dee046a99a2a811c461f1969c3053_u128);
-    apply_bit!(8,  0xfcbe86c7900a88aedcffc83b479aa3a4_u128);
-    apply_bit!(9,  0xf987a7253ac413176f2b074cf7815e54_u128);
+    apply_bit!(1, 0xfff97272373d413259a46990580e213a_u128);
+    apply_bit!(2, 0xfff2e50f5f656932ef12357cf3c7fdcc_u128);
+    apply_bit!(3, 0xffe5caca7e10e4e61c3624eaa0941cd0_u128);
+    apply_bit!(4, 0xffcb9843d60f6159c9db58835c926644_u128);
+    apply_bit!(5, 0xff973b41fa98c081472e6896dfb254c0_u128);
+    apply_bit!(6, 0xff2ea16466c96a3843ec78b326b52861_u128);
+    apply_bit!(7, 0xfe5dee046a99a2a811c461f1969c3053_u128);
+    apply_bit!(8, 0xfcbe86c7900a88aedcffc83b479aa3a4_u128);
+    apply_bit!(9, 0xf987a7253ac413176f2b074cf7815e54_u128);
     apply_bit!(10, 0xf3392b0822b70005940c7a398e4b70f3_u128);
     apply_bit!(11, 0xe7159475a2c29b7443b29c7fa6e889d9_u128);
     apply_bit!(12, 0xd097f3bdfd2022b8845ad8f792aa5825_u128);
@@ -106,7 +106,12 @@ pub fn tick_to_sqrt_price_x96(tick: i32) -> u128 {
 
     // Convert from Q128 to Q96: shift right by 32 bits, with rounding.
     // sqrtPriceX96 = ratio >> 32
-    let sqrt_price = (ratio >> 32) + if (ratio & 0xFFFFFFFF) >= 0x80000000 { 1 } else { 0 };
+    let sqrt_price = (ratio >> 32)
+        + if (ratio & 0xFFFFFFFF) >= 0x80000000 {
+            1
+        } else {
+            0
+        };
 
     // Clamp to valid range.
     sqrt_price.max(MIN_SQRT_PRICE).min(MAX_SQRT_PRICE)
@@ -136,9 +141,7 @@ fn mul_shift128(a: u128, b: u128) -> u128 {
     // mid1 and mid2 each have 128 bits; their high 64 bits add into `top`.
     let mid_sum = (mid1 >> 64).wrapping_add(mid2 >> 64);
     // Carry from the low 64 bits of the middles (approximate — 1-2 ULP error).
-    let mid_lo_carry = ((mid1 & 0xFFFFFFFFFFFFFFFF)
-        .wrapping_add(mid2 & 0xFFFFFFFFFFFFFFFF))
-        >> 64;
+    let mid_lo_carry = ((mid1 & 0xFFFFFFFFFFFFFFFF).wrapping_add(mid2 & 0xFFFFFFFFFFFFFFFF)) >> 64;
 
     top.wrapping_add(mid_sum).wrapping_add(mid_lo_carry)
 }
@@ -191,7 +194,11 @@ pub fn get_amount0_delta(mut sqrt_a: u128, mut sqrt_b: u128, liquidity: i128) ->
     // Use wide arithmetic via splitting to stay in u128.
     let numerator = mul_u128_u96(abs_liq, sqrt_b - sqrt_a); // abs_liq * (sqrt_b - sqrt_a) * 2^96
     let denominator = sqrt_a / Q96 * sqrt_b + sqrt_a % Q96 * sqrt_b / Q96; // sqrt_a * sqrt_b / 2^96
-    let abs_result = if denominator == 0 { 0 } else { numerator / denominator };
+    let abs_result = if denominator == 0 {
+        0
+    } else {
+        numerator / denominator
+    };
     if liquidity >= 0 {
         abs_result as i128
     } else {
@@ -282,7 +289,10 @@ mod tests {
         let sp = tick_to_sqrt_price_x96(0);
         // sqrt(1.0001^0) * 2^96 = 1 * 2^96 = Q96
         // Allow ±2 for rounding
-        assert!((sp as i128 - Q96 as i128).abs() <= 2, "tick 0 expected ~Q96, got {sp}");
+        assert!(
+            (sp as i128 - Q96 as i128).abs() <= 2,
+            "tick 0 expected ~Q96, got {sp}"
+        );
     }
 
     #[test]
@@ -308,7 +318,7 @@ mod tests {
 
     #[test]
     fn amount0_delta_symmetric() {
-        let sp_low  = tick_to_sqrt_price_x96(-100);
+        let sp_low = tick_to_sqrt_price_x96(-100);
         let sp_high = tick_to_sqrt_price_x96(100);
         let liq = 1_000_000_i128;
         let a = get_amount0_delta(sp_low, sp_high, liq);
@@ -318,7 +328,7 @@ mod tests {
 
     #[test]
     fn amount1_delta_symmetric() {
-        let sp_low  = tick_to_sqrt_price_x96(-100);
+        let sp_low = tick_to_sqrt_price_x96(-100);
         let sp_high = tick_to_sqrt_price_x96(100);
         let liq = 1_000_000_i128;
         let a = get_amount1_delta(sp_low, sp_high, liq);
@@ -328,34 +338,40 @@ mod tests {
 
     #[test]
     fn liquidity_for_amount0_roundtrip() {
-        let sp_low  = tick_to_sqrt_price_x96(-100);
+        let sp_low = tick_to_sqrt_price_x96(-100);
         let sp_high = tick_to_sqrt_price_x96(100);
         let liq_in = 1_000_000_i128;
         let amount0 = get_amount0_delta(sp_low, sp_high, liq_in);
         if amount0 > 0 {
             let liq_out = get_liquidity_for_amount0(sp_low, sp_high, amount0);
             // Allow 1% rounding tolerance
-            assert!((liq_out - liq_in).abs() * 100 <= liq_in, "amount0 roundtrip: got {liq_out} expected ~{liq_in}");
+            assert!(
+                (liq_out - liq_in).abs() * 100 <= liq_in,
+                "amount0 roundtrip: got {liq_out} expected ~{liq_in}"
+            );
         }
     }
 
     #[test]
     fn liquidity_for_amount1_roundtrip() {
-        let sp_low  = tick_to_sqrt_price_x96(-100);
+        let sp_low = tick_to_sqrt_price_x96(-100);
         let sp_high = tick_to_sqrt_price_x96(100);
         let liq_in = 1_000_000_i128;
         let amount1 = get_amount1_delta(sp_low, sp_high, liq_in);
         if amount1 > 0 {
             let liq_out = get_liquidity_for_amount1(sp_low, sp_high, amount1);
-            assert!((liq_out - liq_in).abs() * 100 <= liq_in, "amount1 roundtrip: got {liq_out} expected ~{liq_in}");
+            assert!(
+                (liq_out - liq_in).abs() * 100 <= liq_in,
+                "amount1 roundtrip: got {liq_out} expected ~{liq_in}"
+            );
         }
     }
 
     #[test]
     fn negative_liquidity_returns_negative_delta() {
-        let sp_low  = tick_to_sqrt_price_x96(-100);
+        let sp_low = tick_to_sqrt_price_x96(-100);
         let sp_high = tick_to_sqrt_price_x96(100);
-        let a = get_amount0_delta(sp_low, sp_high,  1_000_000);
+        let a = get_amount0_delta(sp_low, sp_high, 1_000_000);
         let b = get_amount0_delta(sp_low, sp_high, -1_000_000);
         assert_eq!(a, -b);
     }
