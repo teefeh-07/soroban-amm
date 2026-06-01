@@ -5,10 +5,10 @@
 pub mod math;
 pub mod tick_bitmap;
 
-use soroban_sdk::{
-    contract, contractimpl, contracterror, contracttype, symbol_short, Address, Env, Vec,
-};
 use soroban_sdk::token::Client as TokenClient;
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
+};
 
 #[cfg(feature = "testutils")]
 pub const WASM: &[u8] = &[];
@@ -22,23 +22,23 @@ const MAX_TICK: i32 = 887_272;
 #[contracterror]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ClError {
-    AlreadyInitialized  = 1,
-    TokensMustDiffer    = 2,
-    InvalidFeeBps       = 3,
-    TickOutOfRange      = 4,
-    ZeroAmounts         = 5,
-    SlippageExceeded    = 6,
-    ZeroLiquidity       = 7,
+    AlreadyInitialized = 1,
+    TokensMustDiffer = 2,
+    InvalidFeeBps = 3,
+    TickOutOfRange = 4,
+    ZeroAmounts = 5,
+    SlippageExceeded = 6,
+    ZeroLiquidity = 7,
     InsufficientLiquidity = 8,
-    PositionNotFound    = 9,
-    DeadlineExpired     = 10,
-    Paused              = 11,
-    Unauthorized        = 12,
-    TickNotAligned      = 13, // tick is not a multiple of tick_spacing
-    InvalidTickSpacing  = 14, // tick_spacing must be > 0
-    TickNotInitialized  = 15, // requested tick has no liquidity (never touched by a position)
-    InvalidToken        = 16, // token_in is not token_a or token_b
-    RangeOrderInRange   = 17, // range order must be fully out-of-range at creation
+    PositionNotFound = 9,
+    DeadlineExpired = 10,
+    Paused = 11,
+    Unauthorized = 12,
+    TickNotAligned = 13,     // tick is not a multiple of tick_spacing
+    InvalidTickSpacing = 14, // tick_spacing must be > 0
+    TickNotInitialized = 15, // requested tick has no liquidity (never touched by a position)
+    InvalidToken = 16,       // token_in is not token_a or token_b
+    RangeOrderInRange = 17,  // range order must be fully out-of-range at creation
 }
 
 /// Status of a range order (issue #295).
@@ -46,11 +46,11 @@ pub enum ClError {
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum RangeOrderStatus {
     /// Price has not yet crossed the range — order is pending.
-    Pending  = 0,
+    Pending = 0,
     /// Price has fully crossed the range — order is filled.
-    Filled   = 1,
+    Filled = 1,
     /// Position was closed before being filled.
-    Closed   = 2,
+    Closed = 2,
 }
 
 /// Result returned by `mint_position_single_token`.
@@ -78,16 +78,16 @@ pub enum DataKey {
     FeeGrowthGlobalB,
     ActiveLiquidity,
     Position(Address, i32, i32),
-    PositionList(Address),    // Vec<(i32, i32)> of open tick ranges per provider
-    TickCumulative,           // i64 — accumulated tick * elapsed_seconds
-    LastOracleTimestamp,      // u64 — last oracle update timestamp
-    OraclePoint(u64),         // timestamp → i64 tick_cumulative snapshot
+    PositionList(Address), // Vec<(i32, i32)> of open tick ranges per provider
+    TickCumulative,        // i64 — accumulated tick * elapsed_seconds
+    LastOracleTimestamp,   // u64 — last oracle update timestamp
+    OraclePoint(u64),      // timestamp → i64 tick_cumulative snapshot
     SqrtPriceX96,
     Tick(i32),
     TickBitmap(i32),
     Admin,
     Paused,
-    TickSpacing,              // i32 — only multiples of this value may be initialized as ticks
+    TickSpacing, // i32 — only multiples of this value may be initialized as ticks
     RangeOrder(Address, i32, i32), // marks a position as a range order (issue #295)
 }
 
@@ -190,15 +190,31 @@ impl ConcentratedLiquidity {
         env.storage().instance().set(&DataKey::TokenA, &token_a);
         env.storage().instance().set(&DataKey::TokenB, &token_b);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
-        env.storage().instance().set(&DataKey::CurrentTick, &initial_tick);
-        env.storage().instance().set(&DataKey::TickSpacing, &tick_spacing);
-        env.storage().instance().set(&DataKey::FeeGrowthGlobalA, &0_i128);
-        env.storage().instance().set(&DataKey::FeeGrowthGlobalB, &0_i128);
-        env.storage().instance().set(&DataKey::ActiveLiquidity, &0_i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::CurrentTick, &initial_tick);
+        env.storage()
+            .instance()
+            .set(&DataKey::TickSpacing, &tick_spacing);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeGrowthGlobalA, &0_i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeGrowthGlobalB, &0_i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::ActiveLiquidity, &0_i128);
         let init_ts = env.ledger().timestamp();
-        env.storage().instance().set(&DataKey::TickCumulative, &0_i64);
-        env.storage().instance().set(&DataKey::LastOracleTimestamp, &init_ts);
-        env.storage().instance().set(&DataKey::OraclePoint(init_ts), &0_i64);
+        env.storage()
+            .instance()
+            .set(&DataKey::TickCumulative, &0_i64);
+        env.storage()
+            .instance()
+            .set(&DataKey::LastOracleTimestamp, &init_ts);
+        env.storage()
+            .instance()
+            .set(&DataKey::OraclePoint(init_ts), &0_i64);
         Ok(())
     }
 
@@ -226,7 +242,10 @@ impl ConcentratedLiquidity {
 
     /// Returns true when the pool is paused.
     pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get(&DataKey::Paused).unwrap_or(false)
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
     }
 
     pub fn mint_position(
@@ -348,7 +367,156 @@ impl ConcentratedLiquidity {
                 .instance()
                 .set(&DataKey::ActiveLiquidity, &(active + liquidity));
         }
-        soroban_amm_sdk::emit_versioned_event!(env, (symbol_short!("mint_pos"), provider), (lower_tick, upper_tick, liquidity, amount_a, amount_b));
+        soroban_amm_sdk::emit_versioned_event!(
+            env,
+            (symbol_short!("mint_pos"), provider),
+            (lower_tick, upper_tick, liquidity, amount_a, amount_b)
+        );
+        Ok((amount_a, amount_b))
+    }
+
+    /// Increase liquidity on an existing position without closing it first.
+    ///
+    /// This explicit modification flow reuses the same `(provider, lower_tick,
+    /// upper_tick)` storage key, settles accrued fees into `tokens_owed`, and
+    /// computes the required token amounts from the current price before
+    /// increasing the stored liquidity.
+    pub fn modify_position(
+        env: Env,
+        provider: Address,
+        lower_tick: i32,
+        upper_tick: i32,
+        liquidity_delta: i128,
+        min_a: i128,
+        min_b: i128,
+    ) -> Result<(i128, i128), ClError> {
+        if Self::is_paused(env.clone()) {
+            return Err(ClError::Paused);
+        }
+        provider.require_auth();
+        if lower_tick >= upper_tick {
+            return Err(ClError::TickOutOfRange);
+        }
+        if lower_tick < MIN_TICK || upper_tick > MAX_TICK {
+            return Err(ClError::TickOutOfRange);
+        }
+        let tick_spacing: i32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TickSpacing)
+            .unwrap_or(1);
+        if lower_tick % tick_spacing != 0 || upper_tick % tick_spacing != 0 {
+            return Err(ClError::TickNotAligned);
+        }
+        if liquidity_delta <= 0 {
+            return Err(ClError::ZeroLiquidity);
+        }
+
+        let current_tick: i32 = env.storage().instance().get(&DataKey::CurrentTick).unwrap();
+        let token_a: Address = env.storage().instance().get(&DataKey::TokenA).unwrap();
+        let token_b: Address = env.storage().instance().get(&DataKey::TokenB).unwrap();
+        let pos_key = DataKey::Position(provider.clone(), lower_tick, upper_tick);
+        let mut pos: Position = env
+            .storage()
+            .instance()
+            .get(&pos_key)
+            .ok_or(ClError::PositionNotFound)?;
+
+        let (amount_a, amount_b) = Self::amounts_for_liquidity_to_burn(
+            current_tick,
+            lower_tick,
+            upper_tick,
+            liquidity_delta,
+        );
+        if amount_a <= 0 && amount_b <= 0 {
+            return Err(ClError::ZeroLiquidity);
+        }
+        if amount_a < min_a || amount_b < min_b {
+            return Err(ClError::SlippageExceeded);
+        }
+
+        if amount_a > 0 {
+            TokenClient::new(&env, &token_a).transfer(
+                &provider,
+                &env.current_contract_address(),
+                &amount_a,
+            );
+        }
+        if amount_b > 0 {
+            TokenClient::new(&env, &token_b).transfer(
+                &provider,
+                &env.current_contract_address(),
+                &amount_b,
+            );
+        }
+
+        let (fg_inside_a, fg_inside_b) =
+            Self::fee_growth_inside(env.clone(), lower_tick, upper_tick);
+        let (oa, ob) = Self::pending_fees(&pos, fg_inside_a, fg_inside_b);
+        pos.tokens_owed = (pos.tokens_owed.0 + oa, pos.tokens_owed.1 + ob);
+        pos.fee_growth_inside_a = fg_inside_a;
+        pos.fee_growth_inside_b = fg_inside_b;
+        pos.liquidity += liquidity_delta;
+
+        let list_key = DataKey::PositionList(provider.clone());
+        let mut list: Vec<(i32, i32)> = env
+            .storage()
+            .instance()
+            .get(&list_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        let range = (lower_tick, upper_tick);
+        if !list.iter().any(|r| r == range) {
+            list.push_back(range);
+            env.storage().instance().set(&list_key, &list);
+        }
+        env.storage().instance().set(&pos_key, &pos);
+
+        let fg_a: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeGrowthGlobalA)
+            .unwrap_or(0);
+        let fg_b: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FeeGrowthGlobalB)
+            .unwrap_or(0);
+        Self::update_tick(
+            &env,
+            lower_tick,
+            current_tick,
+            liquidity_delta,
+            false,
+            fg_a,
+            fg_b,
+        );
+        Self::update_tick(
+            &env,
+            upper_tick,
+            current_tick,
+            liquidity_delta,
+            true,
+            fg_a,
+            fg_b,
+        );
+
+        if current_tick >= lower_tick && current_tick < upper_tick {
+            let active: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::ActiveLiquidity)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::ActiveLiquidity, &(active + liquidity_delta));
+        }
+
+        soroban_amm_sdk::emit_versioned_event!(
+            env,
+            (symbol_short!("mod_pos"), provider),
+            (lower_tick, upper_tick, liquidity_delta, amount_a, amount_b)
+        );
+
         Ok((amount_a, amount_b))
     }
 
@@ -569,7 +737,11 @@ impl ConcentratedLiquidity {
         // provider, so no transfer is needed — it simply stays in their wallet.
         let dust = amount_in - amount_used;
 
-        soroban_amm_sdk::emit_versioned_event!(env, (symbol_short!("mint_1t"), provider), (lower_tick, upper_tick, liquidity, amount_used, dust));
+        soroban_amm_sdk::emit_versioned_event!(
+            env,
+            (symbol_short!("mint_1t"), provider),
+            (lower_tick, upper_tick, liquidity, amount_used, dust)
+        );
 
         Ok(SingleTokenDepositResult {
             amount_used,
@@ -714,9 +886,10 @@ impl ConcentratedLiquidity {
         )?;
 
         // Tag the position as a range order.
-        env.storage()
-            .instance()
-            .set(&DataKey::RangeOrder(provider.clone(), lower_tick, upper_tick), &true);
+        env.storage().instance().set(
+            &DataKey::RangeOrder(provider.clone(), lower_tick, upper_tick),
+            &true,
+        );
 
         soroban_amm_sdk::emit_versioned_event!(
             env,
@@ -849,7 +1022,15 @@ impl ConcentratedLiquidity {
             .instance()
             .get(&DataKey::FeeGrowthGlobalB)
             .unwrap_or(0);
-        Self::update_tick(&env, lower_tick, current_tick, -liquidity, false, fg_a, fg_b);
+        Self::update_tick(
+            &env,
+            lower_tick,
+            current_tick,
+            -liquidity,
+            false,
+            fg_a,
+            fg_b,
+        );
         Self::update_tick(&env, upper_tick, current_tick, -liquidity, true, fg_a, fg_b);
 
         if current_tick >= lower_tick && current_tick < upper_tick {
@@ -881,7 +1062,11 @@ impl ConcentratedLiquidity {
                 &amount_b,
             );
         }
-        soroban_amm_sdk::emit_versioned_event!(env, (symbol_short!("burn_pos"), provider), (lower_tick, upper_tick, liquidity, amount_a, amount_b));
+        soroban_amm_sdk::emit_versioned_event!(
+            env,
+            (symbol_short!("burn_pos"), provider),
+            (lower_tick, upper_tick, liquidity, amount_a, amount_b)
+        );
         Ok((amount_a, amount_b))
     }
 
@@ -925,7 +1110,11 @@ impl ConcentratedLiquidity {
                 &total_b,
             );
         }
-        soroban_amm_sdk::emit_versioned_event!(env, (symbol_short!("coll_fees"), provider), (lower_tick, upper_tick, total_a, total_b));
+        soroban_amm_sdk::emit_versioned_event!(
+            env,
+            (symbol_short!("coll_fees"), provider),
+            (lower_tick, upper_tick, total_a, total_b)
+        );
         Ok((total_a, total_b))
     }
 
@@ -1132,9 +1321,15 @@ impl ConcentratedLiquidity {
                 .get(&DataKey::TickCumulative)
                 .unwrap_or(0);
             let new_cum = cum + (current_tick_oracle as i64) * elapsed;
-            env.storage().instance().set(&DataKey::TickCumulative, &new_cum);
-            env.storage().instance().set(&DataKey::LastOracleTimestamp, &now);
-            env.storage().instance().set(&DataKey::OraclePoint(now), &new_cum);
+            env.storage()
+                .instance()
+                .set(&DataKey::TickCumulative, &new_cum);
+            env.storage()
+                .instance()
+                .set(&DataKey::LastOracleTimestamp, &now);
+            env.storage()
+                .instance()
+                .set(&DataKey::OraclePoint(now), &new_cum);
         }
 
         let fee_bps: i128 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
@@ -1385,13 +1580,17 @@ impl ConcentratedLiquidity {
             .instance()
             .set(&DataKey::SqrtPriceX96, &sqrt_price_x96);
 
-        soroban_amm_sdk::emit_versioned_event!(env, (soroban_sdk::symbol_short!("swap"), sender), (
+        soroban_amm_sdk::emit_versioned_event!(
+            env,
+            (soroban_sdk::symbol_short!("swap"), sender),
+            (
                 zero_for_one,
                 amount_in_actual,
                 amount_out_total,
                 sqrt_price_x96,
                 current_tick,
-            ));
+            )
+        );
 
         Ok(amount_out_total)
     }
@@ -1474,8 +1673,16 @@ impl ConcentratedLiquidity {
 
     /// Returns raw (tick_cumulative, last_timestamp) for external consumers.
     pub fn get_tick_cumulative(env: Env) -> (i64, u64) {
-        let cum: i64 = env.storage().instance().get(&DataKey::TickCumulative).unwrap_or(0);
-        let ts: u64 = env.storage().instance().get(&DataKey::LastOracleTimestamp).unwrap_or(0);
+        let cum: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TickCumulative)
+            .unwrap_or(0);
+        let ts: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LastOracleTimestamp)
+            .unwrap_or(0);
         (cum, ts)
     }
 
@@ -1483,7 +1690,11 @@ impl ConcentratedLiquidity {
     /// Looks up the stored oracle snapshot at exactly `now - seconds_ago`.
     /// `seconds_ago == 0` returns the current cumulative value (extrapolated to now).
     pub fn observe(env: Env, seconds_ago: u64) -> i64 {
-        let cum: i64 = env.storage().instance().get(&DataKey::TickCumulative).unwrap_or(0);
+        let cum: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TickCumulative)
+            .unwrap_or(0);
         let last_ts: u64 = env
             .storage()
             .instance()
@@ -1640,7 +1851,7 @@ impl ConcentratedLiquidity {
     }
 
     /// Compute actual token amounts from desired amounts based on current price position.
-    /// When out of range, only one token type is used. When in range, amounts are 
+    /// When out of range, only one token type is used. When in range, amounts are
     /// distributed proportionally based on the price within the range.
     fn amounts_for_liquidity(ct: i32, lt: i32, ut: i32, ad: i128, bd: i128) -> (i128, i128) {
         if ct < lt {
@@ -1649,7 +1860,7 @@ impl ConcentratedLiquidity {
         if ct >= ut {
             return (0, bd);
         }
-        
+
         // In-range: distribute amounts based on price position
         let pl = Self::tick_to_price(lt);
         let pu = Self::tick_to_price(ut);
@@ -1679,12 +1890,12 @@ impl ConcentratedLiquidity {
             let amount_b = math::get_amount1_delta(sqrt_lower, sqrt_upper, liquidity);
             return (0, amount_b);
         }
-        
+
         // In-range: use proper sqrtPriceX96 formulas
         let sqrt_lower = Self::tick_to_sqrt_price_x96(lt);
         let sqrt_upper = Self::tick_to_sqrt_price_x96(ut);
         let sqrt_current = Self::tick_to_sqrt_price_x96(ct);
-        
+
         // Token A covers [current, upper], Token B covers [lower, current]
         let amount_a = math::get_amount0_delta(sqrt_current, sqrt_upper, liquidity);
         let amount_b = math::get_amount1_delta(sqrt_lower, sqrt_current, liquidity);
@@ -2014,8 +2225,7 @@ impl ConcentratedLiquidity {
 
                     let actual_in = if hit_limit {
                         if fee_bps > 0 {
-                            (amt_in_after_fee * 10000 + 10000 - fee_bps - 1)
-                                / (10000 - fee_bps)
+                            (amt_in_after_fee * 10000 + 10000 - fee_bps - 1) / (10000 - fee_bps)
                         } else {
                             amt_in_after_fee
                         }
@@ -2277,9 +2487,14 @@ mod tests {
             .mint_position(&te.provider, &-100, &100, &100_000, &100_000, &0, &0);
 
         let quote = te.client.estimate_price_impact(&true, &1_000_i128, &0_u128);
-        let out = te
-            .client
-            .swap(&te.provider, &true, &1_000_i128, &0_u128, &0_i128, &10_000_u64);
+        let out = te.client.swap(
+            &te.provider,
+            &true,
+            &1_000_i128,
+            &0_u128,
+            &0_i128,
+            &10_000_u64,
+        );
         let state = te.client.get_pool_state();
 
         assert_eq!(quote.amount_out, out);
@@ -2309,9 +2524,14 @@ mod tests {
         let quote = te
             .client
             .estimate_price_impact(&true, &25_000_i128, &0_u128);
-        let out = te
-            .client
-            .swap(&te.provider, &true, &25_000_i128, &0_u128, &0_i128, &10_000_u64);
+        let out = te.client.swap(
+            &te.provider,
+            &true,
+            &25_000_i128,
+            &0_u128,
+            &0_i128,
+            &10_000_u64,
+        );
         let state = te.client.get_pool_state();
 
         assert_eq!(quote.amount_out, out);
@@ -2386,15 +2606,9 @@ mod tests {
         te.client.pause(&te.admin);
         assert!(te.client.is_paused());
 
-        let result = te.client.try_mint_position(
-            &te.provider,
-            &-100,
-            &100,
-            &10_000,
-            &10_000,
-            &0,
-            &0,
-        );
+        let result =
+            te.client
+                .try_mint_position(&te.provider, &-100, &100, &10_000, &10_000, &0, &0);
         assert_eq!(result, Err(Ok(ClError::Paused)));
     }
 
@@ -2403,10 +2617,13 @@ mod tests {
         let env = Env::default();
         let te = setup_test_env(&env, 30, 0);
 
-        te.client.mint_position(&te.provider, &-100, &100, &10_000, &10_000, &0, &0);
+        te.client
+            .mint_position(&te.provider, &-100, &100, &10_000, &10_000, &0, &0);
         te.client.pause(&te.admin);
 
-        let result = te.client.try_swap(&te.provider, &true, &1_000, &0, &0, &u64::MAX);
+        let result = te
+            .client
+            .try_swap(&te.provider, &true, &1_000, &0, &0, &u64::MAX);
         assert_eq!(result, Err(Ok(ClError::Paused)));
     }
 
@@ -2415,7 +2632,8 @@ mod tests {
         let env = Env::default();
         let te = setup_test_env(&env, 30, 0);
 
-        te.client.mint_position(&te.provider, &100, &200, &5_000, &0, &0, &0);
+        te.client
+            .mint_position(&te.provider, &100, &200, &5_000, &0, &0, &0);
         let pos = te.client.get_position(&te.provider, &100, &200);
         let liq = pos.liquidity;
 
@@ -2428,7 +2646,8 @@ mod tests {
         // collect_fees should also succeed while paused (nothing to collect here but shouldn't error)
         // Re-mint to get a position to collect on
         te.client.unpause(&te.admin);
-        te.client.mint_position(&te.provider, &100, &200, &5_000, &0, &0, &0);
+        te.client
+            .mint_position(&te.provider, &100, &200, &5_000, &0, &0, &0);
         te.client.pause(&te.admin);
         let collect_result = te.client.try_collect_fees(&te.provider, &100, &200);
         assert!(collect_result.is_ok());
@@ -2457,7 +2676,8 @@ mod tests {
         assert!(!te.client.is_paused());
 
         // Should now succeed
-        te.client.mint_position(&te.provider, &-100, &100, &10_000, &10_000, &0, &0);
+        te.client
+            .mint_position(&te.provider, &-100, &100, &10_000, &10_000, &0, &0);
     }
 
     #[test]
@@ -2473,7 +2693,7 @@ mod tests {
 
         let (total_a, total_b) = te.client.collect_fees(&te.provider, &0, &150);
 
-        use soroban_sdk::{IntoVal, Val, Vec as SdkVec, testutils::Events as _};
+        use soroban_sdk::{testutils::Events as _, IntoVal, Val, Vec as SdkVec};
         let expected_topics: SdkVec<Val> =
             (symbol_short!("coll_fees"), te.provider.clone()).into_val(&env);
         let event = env
@@ -2685,7 +2905,14 @@ mod test {
 
         let contract_id = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &contract_id);
-        client.initialize(&admin, &token_a_addr, &token_b_addr, &30_i128, &0_i32, &1_i32);
+        client.initialize(
+            &admin,
+            &token_a_addr,
+            &token_b_addr,
+            &30_i128,
+            &0_i32,
+            &1_i32,
+        );
 
         let provider = Address::generate(&env);
         StellarAssetClient::new(&env, &token_a_addr).mint(&provider, &1_000_i128);
@@ -2738,8 +2965,12 @@ mod test_new_features {
 
     fn setup(env: &Env) -> (Address, Address, Address, ConcentratedLiquidityClient) {
         let admin = Address::generate(env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &30_i128, &0_i32, &1_i32);
@@ -2755,8 +2986,12 @@ mod test_new_features {
         env.ledger().set_timestamp(1_000);
 
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &30_i128, &10_i32, &1_i32);
@@ -2795,8 +3030,12 @@ mod test_new_features {
         env.ledger().set_timestamp(1_000);
 
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &30_i128, &5_i32, &1_i32);
@@ -2822,8 +3061,12 @@ mod test_new_features {
         env.ledger().set_timestamp(1_000);
 
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &30_i128, &0_i32, &1_i32);
@@ -2845,7 +3088,7 @@ mod test_new_features {
         // Compute average tick over [1000, 1200]:
         // cum at t=1000 = 0 (initialized)
         // cum at t=1200 = 0*100 + tick_at_1100*100
-        let obs_now = client.observe(&0_u64);   // cum at t=1200
+        let obs_now = client.observe(&0_u64); // cum at t=1200
         let obs_200s_ago = client.observe(&200_u64); // cum at t=1000 = 0
         let avg_tick = (obs_now - obs_200s_ago) / 200_i64;
         // avg tick = tick_at_1100 * 100 / 200 = tick_at_1100 / 2
@@ -2860,8 +3103,12 @@ mod test_new_features {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &30_i128, &0_i32, &1_i32);
@@ -2871,14 +3118,32 @@ mod test_new_features {
         StellarAssetClient::new(&env, &token_b).mint(&provider, &10_000_i128);
 
         // Mint two positions
-        client.mint_position(&provider, &-100_i32, &100_i32, &5_000_i128, &5_000_i128, &0_i128, &0_i128);
-        client.mint_position(&provider, &200_i32, &400_i32, &3_000_i128, &0_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &5_000_i128,
+            &5_000_i128,
+            &0_i128,
+            &0_i128,
+        );
+        client.mint_position(
+            &provider,
+            &200_i32,
+            &400_i32,
+            &3_000_i128,
+            &0_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         let positions = client.get_positions(&provider);
         assert_eq!(positions.len(), 2);
 
         // Close first position
-        let liq1 = client.get_position(&provider, &-100_i32, &100_i32).liquidity;
+        let liq1 = client
+            .get_position(&provider, &-100_i32, &100_i32)
+            .liquidity;
         StellarAssetClient::new(&env, &token_a).mint(&cl_addr, &10_000_i128);
         StellarAssetClient::new(&env, &token_b).mint(&cl_addr, &10_000_i128);
         client.burn_position(&provider, &-100_i32, &100_i32, &liq1);
@@ -2896,8 +3161,12 @@ mod test_new_features {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         // current_tick = 0; range [100, 200] is entirely above → pure token-A position
@@ -2913,13 +3182,112 @@ mod test_new_features {
 
         // mint_position with the same range should consume approximately (qa, qb)
         let (ma, mb) = client.mint_position(
-            &provider, &100_i32, &200_i32,
-            &qa, &0_i128,
-            &0_i128, &0_i128,
+            &provider, &100_i32, &200_i32, &qa, &0_i128, &0_i128, &0_i128,
         );
         // Due to rounding, amounts may differ slightly
         assert!(ma > 0, "mint should consume some token_a");
-        assert_eq!(mb, 0_i128, "mint should not consume token_b for above-range");
+        assert_eq!(
+            mb, 0_i128,
+            "mint should not consume token_b for above-range"
+        );
+    }
+
+    // ── Issue #223: position modification ────────────────────────────────────
+
+    #[test]
+    fn modify_position_increases_liquidity_settles_fees_and_reuses_storage() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let cl_addr = env.register_contract(None, ConcentratedLiquidity);
+        let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
+        client.initialize(&admin, &token_a, &token_b, &30_i128, &0_i32, &1_i32);
+
+        let provider = Address::generate(&env);
+        StellarAssetClient::new(&env, &token_a).mint(&provider, &500_000_i128);
+        StellarAssetClient::new(&env, &token_b).mint(&provider, &500_000_i128);
+        StellarAssetClient::new(&env, &token_a).mint(&cl_addr, &500_000_i128);
+        StellarAssetClient::new(&env, &token_b).mint(&cl_addr, &500_000_i128);
+
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &50_000_i128,
+            &50_000_i128,
+            &0_i128,
+            &0_i128,
+        );
+
+        let position_before = client.get_position(&provider, &-100_i32, &100_i32);
+        let positions_before = client.get_positions(&provider);
+        assert_eq!(
+            positions_before.len(),
+            1,
+            "opening a position should track one range"
+        );
+
+        // Accrue fees against the position, but do not collect them yet.
+        client.swap(&provider, &true, &20_000_i128, &0_u128, &0_i128, &u64::MAX);
+        let position_after_swap = client.get_position(&provider, &-100_i32, &100_i32);
+        assert_eq!(
+            position_after_swap.tokens_owed, position_before.tokens_owed,
+            "swap should accrue fees without auto-settling them"
+        );
+
+        let quote = client
+            .quote_position(&-100_i32, &100_i32, &5_000_i128)
+            .unwrap();
+        let (added_a, added_b) = client
+            .modify_position(
+                &provider,
+                &-100_i32,
+                &100_i32,
+                &5_000_i128,
+                &0_i128,
+                &0_i128,
+            )
+            .unwrap();
+
+        assert_eq!(
+            added_a, quote.0,
+            "modify_position must use the current-price quote for token A"
+        );
+        assert_eq!(
+            added_b, quote.1,
+            "modify_position must use the current-price quote for token B"
+        );
+
+        let position_after = client.get_position(&provider, &-100_i32, &100_i32);
+        assert_eq!(
+            position_after.liquidity,
+            position_before.liquidity + 5_000_i128,
+            "liquidity must increase in place"
+        );
+        assert!(
+            position_after.tokens_owed.0 > position_after_swap.tokens_owed.0
+                || position_after.tokens_owed.1 > position_after_swap.tokens_owed.1,
+            "fees accrued before modification must be settled into tokens_owed"
+        );
+
+        let positions_after = client.get_positions(&provider);
+        assert_eq!(
+            positions_after.len(),
+            1,
+            "storage must be reused for the same range"
+        );
+        assert_eq!(
+            positions_after.get(0).unwrap(),
+            (-100_i32, 100_i32),
+            "the same position key should remain in the provider list"
+        );
     }
 }
 
@@ -2931,11 +3299,18 @@ mod test_tick_spacing {
     use soroban_sdk::token::StellarAssetClient;
     use soroban_sdk::Env;
 
-    fn setup_cl(env: &Env, tick_spacing: i32) -> (Address, Address, Address, ConcentratedLiquidityClient) {
+    fn setup_cl(
+        env: &Env,
+        tick_spacing: i32,
+    ) -> (Address, Address, Address, ConcentratedLiquidityClient) {
         env.mock_all_auths();
         let admin = Address::generate(env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &30_i128, &0_i32, &tick_spacing);
@@ -2954,9 +3329,13 @@ mod test_tick_spacing {
 
         // -100 and 100 are both multiples of 10 → must succeed.
         let result = client.try_mint_position(
-            &provider, &-100_i32, &100_i32,
-            &100_000_i128, &100_000_i128,
-            &0_i128, &0_i128,
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &100_000_i128,
+            &100_000_i128,
+            &0_i128,
+            &0_i128,
         );
         assert!(result.is_ok(), "aligned ticks should be accepted");
     }
@@ -2969,9 +3348,13 @@ mod test_tick_spacing {
 
         // lower_tick = -95 is not a multiple of 10.
         let result = client.try_mint_position(
-            &provider, &-95_i32, &100_i32,
-            &100_000_i128, &100_000_i128,
-            &0_i128, &0_i128,
+            &provider,
+            &-95_i32,
+            &100_i32,
+            &100_000_i128,
+            &100_000_i128,
+            &0_i128,
+            &0_i128,
         );
         assert_eq!(result, Err(Ok(ClError::TickNotAligned)));
     }
@@ -2984,9 +3367,13 @@ mod test_tick_spacing {
 
         // upper_tick = 105 is not a multiple of 10.
         let result = client.try_mint_position(
-            &provider, &-100_i32, &105_i32,
-            &100_000_i128, &100_000_i128,
-            &0_i128, &0_i128,
+            &provider,
+            &-100_i32,
+            &105_i32,
+            &100_000_i128,
+            &100_000_i128,
+            &0_i128,
+            &0_i128,
         );
         assert_eq!(result, Err(Ok(ClError::TickNotAligned)));
     }
@@ -2997,8 +3384,12 @@ mod test_tick_spacing {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
 
@@ -3013,7 +3404,10 @@ mod test_tick_spacing {
         let (_provider, _ta, _tb, client) = setup_cl(&env, 60);
 
         let state = client.get_pool_state();
-        assert_eq!(state.tick_spacing, 60, "get_pool_state must return tick_spacing = 60");
+        assert_eq!(
+            state.tick_spacing, 60,
+            "get_pool_state must return tick_spacing = 60"
+        );
     }
 
     /// tick_spacing = 1 allows every tick (no restriction).
@@ -3024,9 +3418,13 @@ mod test_tick_spacing {
 
         // Odd ticks (not multiples of anything > 1) should work fine.
         let result = client.try_mint_position(
-            &provider, &-7_i32, &13_i32,
-            &100_000_i128, &100_000_i128,
-            &0_i128, &0_i128,
+            &provider,
+            &-7_i32,
+            &13_i32,
+            &100_000_i128,
+            &100_000_i128,
+            &0_i128,
+            &0_i128,
         );
         assert!(result.is_ok(), "tick_spacing=1 must allow any tick pair");
     }
@@ -3043,8 +3441,12 @@ mod test_new_tick_features {
     fn setup_pool(env: &Env) -> (Address, Address, Address, ConcentratedLiquidityClient) {
         env.mock_all_auths();
         let admin = Address::generate(env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &0_i128, &0_i32, &1_i32);
@@ -3079,28 +3481,59 @@ mod test_new_tick_features {
     fn is_tick_initialized_true_after_mint() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
-        assert!(client.is_tick_initialized(&-100_i32), "lower tick must be initialized");
-        assert!(client.is_tick_initialized(&100_i32),  "upper tick must be initialized");
-        assert!(!client.is_tick_initialized(&0_i32),   "non-boundary tick must stay uninitialized");
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
+        assert!(
+            client.is_tick_initialized(&-100_i32),
+            "lower tick must be initialized"
+        );
+        assert!(
+            client.is_tick_initialized(&100_i32),
+            "upper tick must be initialized"
+        );
+        assert!(
+            !client.is_tick_initialized(&0_i32),
+            "non-boundary tick must stay uninitialized"
+        );
     }
 
     #[test]
     fn get_tick_info_returns_correct_values_after_mint() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         let lower_info = client.get_tick_info(&-100_i32);
         let upper_info = client.get_tick_info(&100_i32);
 
         // lower tick: liquidity_net > 0, gross > 0
-        assert!(lower_info.liquidity_gross > 0, "lower gross must be positive");
-        assert!(lower_info.liquidity_net > 0,   "lower net must be positive");
+        assert!(
+            lower_info.liquidity_gross > 0,
+            "lower gross must be positive"
+        );
+        assert!(lower_info.liquidity_net > 0, "lower net must be positive");
 
         // upper tick: liquidity_net < 0 (negative = exits liquidity), gross > 0
-        assert!(upper_info.liquidity_gross > 0, "upper gross must be positive");
-        assert!(upper_info.liquidity_net < 0,   "upper net must be negative");
+        assert!(
+            upper_info.liquidity_gross > 0,
+            "upper gross must be positive"
+        );
+        assert!(upper_info.liquidity_net < 0, "upper net must be negative");
 
         // gross must be equal in magnitude
         assert_eq!(lower_info.liquidity_gross, upper_info.liquidity_gross);
@@ -3110,14 +3543,30 @@ mod test_new_tick_features {
     fn is_tick_initialized_false_after_full_burn() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
         assert!(client.is_tick_initialized(&-100_i32));
 
-        let liq = client.get_position(&provider, &-100_i32, &100_i32).liquidity;
+        let liq = client
+            .get_position(&provider, &-100_i32, &100_i32)
+            .liquidity;
         client.burn_position(&provider, &-100_i32, &100_i32, &liq);
 
-        assert!(!client.is_tick_initialized(&-100_i32), "lower tick must be de-initialized after full burn");
-        assert!(!client.is_tick_initialized(&100_i32),  "upper tick must be de-initialized after full burn");
+        assert!(
+            !client.is_tick_initialized(&-100_i32),
+            "lower tick must be de-initialized after full burn"
+        );
+        assert!(
+            !client.is_tick_initialized(&100_i32),
+            "upper tick must be de-initialized after full burn"
+        );
     }
 
     // ── Issue #218: tick bitmap public API ───────────────────────────────────
@@ -3128,7 +3577,10 @@ mod test_new_tick_features {
         let (_provider, _ta, _tb, client) = setup_pool(&env);
         // No positions → bitmap is empty.
         let result = client.next_initialized_tick_pub(&0_i32);
-        assert!(result.is_none(), "no ticks should be found when pool has no positions");
+        assert!(
+            result.is_none(),
+            "no ticks should be found when pool has no positions"
+        );
     }
 
     #[test]
@@ -3144,7 +3596,15 @@ mod test_new_tick_features {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
         // Initializes ticks -100 and 100.
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         // next above tick -200: the first initialized tick above -200 is -100.
         let next = client.next_initialized_tick_pub(&-200_i32);
@@ -3174,8 +3634,24 @@ mod test_new_tick_features {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
         // Two non-overlapping ranges initialize 4 distinct ticks.
-        client.mint_position(&provider, &-200_i32, &-100_i32, &0_i128, &5_000_i128, &0_i128, &0_i128);
-        client.mint_position(&provider, &100_i32,  &200_i32,  &5_000_i128, &0_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-200_i32,
+            &-100_i32,
+            &0_i128,
+            &5_000_i128,
+            &0_i128,
+            &0_i128,
+        );
+        client.mint_position(
+            &provider,
+            &100_i32,
+            &200_i32,
+            &5_000_i128,
+            &0_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         assert!(client.is_tick_initialized(&-200_i32));
         assert!(client.is_tick_initialized(&-100_i32));
@@ -3216,7 +3692,10 @@ mod test_new_tick_features {
         let one_q96: u128 = 1u128 << 96;
         // Expected ≈ 1.005012 * 2^96. Allow ±1 bps = 0.01%.
         let expected_approx = one_q96 + one_q96 / 200; // 1.005 * 2^96 (rough lower bound)
-        assert!(sp >= expected_approx, "sqrtPrice(100) must be at least 1.005 * 2^96");
+        assert!(
+            sp >= expected_approx,
+            "sqrtPrice(100) must be at least 1.005 * 2^96"
+        );
         let upper = one_q96 + one_q96 / 100; // 1.01 * 2^96 (rough upper bound)
         assert!(sp <= upper, "sqrtPrice(100) must be at most 1.01 * 2^96");
     }
@@ -3253,7 +3732,10 @@ mod test_new_tick_features {
         // Allow a tiny rounding difference.
         let diff = (computed as i128 - state.sqrt_price as i128).abs();
         let one_pct = (state.sqrt_price / 100) as i128;
-        assert!(diff <= one_pct, "tick_to_sqrt_price_x96 must agree with pool sqrtPrice within 1%");
+        assert!(
+            diff <= one_pct,
+            "tick_to_sqrt_price_x96 must agree with pool sqrtPrice within 1%"
+        );
     }
 
     // ── Issue #220: tick state machine query helpers ──────────────────────────
@@ -3269,35 +3751,66 @@ mod test_new_tick_features {
     fn get_liquidity_net_at_tick_correct_after_mint() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
         let lower_net = client.get_liquidity_net_at_tick(&-100_i32);
         let upper_net = client.get_liquidity_net_at_tick(&100_i32);
         assert!(lower_net > 0, "lower tick liquidity_net must be positive");
         assert!(upper_net < 0, "upper tick liquidity_net must be negative");
-        assert_eq!(lower_net, -upper_net, "net values must be equal and opposite");
+        assert_eq!(
+            lower_net, -upper_net,
+            "net values must be equal and opposite"
+        );
     }
 
     #[test]
     fn simulate_tick_cross_upward_adds_net_liquidity() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         let net = client.get_liquidity_net_at_tick(&-100_i32);
         // Crossing lower tick upward (zero_for_one=false) adds net.
         let result = client.simulate_tick_cross(&0_i128, &-100_i32, &false);
-        assert_eq!(result, net.max(0), "crossing lower tick upward must add net liquidity");
+        assert_eq!(
+            result,
+            net.max(0),
+            "crossing lower tick upward must add net liquidity"
+        );
     }
 
     #[test]
     fn simulate_tick_cross_downward_subtracts_net_liquidity() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         let net = client.get_liquidity_net_at_tick(&-100_i32);
         let active = net; // assume we're currently above lower_tick with net liq
-        // Crossing lower tick downward (zero_for_one=true) subtracts net.
+                          // Crossing lower tick downward (zero_for_one=true) subtracts net.
         let result = client.simulate_tick_cross(&active, &-100_i32, &true);
         assert_eq!(result, (active - net).max(0));
     }
@@ -3306,12 +3819,24 @@ mod test_new_tick_features {
     fn simulate_tick_cross_does_not_modify_state() {
         let env = Env::default();
         let (provider, _ta, _tb, client) = setup_pool(&env);
-        client.mint_position(&provider, &-100_i32, &100_i32, &10_000_i128, &10_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &-100_i32,
+            &100_i32,
+            &10_000_i128,
+            &10_000_i128,
+            &0_i128,
+            &0_i128,
+        );
 
         let liq_before = client.active_liquidity();
         // Call simulate — must not change active liquidity.
         client.simulate_tick_cross(&liq_before, &-100_i32, &false);
-        assert_eq!(client.active_liquidity(), liq_before, "simulate_tick_cross must not modify state");
+        assert_eq!(
+            client.active_liquidity(),
+            liq_before,
+            "simulate_tick_cross must not modify state"
+        );
     }
 
     #[test]
@@ -3321,8 +3846,12 @@ mod test_new_tick_features {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         // Start at tick 10, so range [-50, 0] is below current and [0, 50] includes current.
@@ -3335,13 +3864,36 @@ mod test_new_tick_features {
         StellarAssetClient::new(&env, &token_b).mint(&cl_addr, &10_000_000_i128);
 
         // Range [0, 50] covers current tick 10 → active_liquidity increases.
-        client.mint_position(&provider, &0_i32, &50_i32, &100_000_i128, &100_000_i128, &0_i128, &0_i128);
+        client.mint_position(
+            &provider,
+            &0_i32,
+            &50_i32,
+            &100_000_i128,
+            &100_000_i128,
+            &0_i128,
+            &0_i128,
+        );
         let liq_in_range = client.active_liquidity();
-        assert!(liq_in_range > 0, "position covering current tick must add active liquidity");
+        assert!(
+            liq_in_range > 0,
+            "position covering current tick must add active liquidity"
+        );
 
         // Range [-50, 0] is entirely below current tick → no active liquidity yet.
-        client.mint_position(&provider, &-50_i32, &0_i32, &0_i128, &50_000_i128, &0_i128, &0_i128);
-        assert_eq!(client.active_liquidity(), liq_in_range, "out-of-range position must not change active liq");
+        client.mint_position(
+            &provider,
+            &-50_i32,
+            &0_i32,
+            &0_i128,
+            &50_000_i128,
+            &0_i128,
+            &0_i128,
+        );
+        assert_eq!(
+            client.active_liquidity(),
+            liq_in_range,
+            "out-of-range position must not change active liq"
+        );
 
         // Verify tick-state-machine view: net at tick 0 accounts for both positions.
         let net_at_0 = client.get_liquidity_net_at_tick(&0_i32);
@@ -3352,7 +3904,10 @@ mod test_new_tick_features {
         // The liquidity_net at tick 0 = (liq from [0,50] as lower) + (-liq from [-50,0] as upper)
         // = liq1 - liq2 (approximately, since both have similar amounts)
         // Just verify it's non-zero (both positions contributed).
-        assert_ne!(net_at_0, 0_i128, "tick 0 net must be non-zero with two adjacent positions");
+        assert_ne!(
+            net_at_0, 0_i128,
+            "tick 0 net must be non-zero with two adjacent positions"
+        );
 
         // Perform a downward swap to cross below tick 0.
         client.swap(&provider, &true, &5_000_i128, &0_u128, &0_i128, &u64::MAX);
@@ -3362,7 +3917,10 @@ mod test_new_tick_features {
         // The net change should reflect both crossing events.
         let liq_after = client.active_liquidity();
         // Price now in [-50, 0), so the second position is active and first is not.
-        assert!(liq_after > 0, "lower range must be active after crossing tick 0 downward");
+        assert!(
+            liq_after > 0,
+            "lower range must be active after crossing tick 0 downward"
+        );
     }
 }
 
@@ -3422,7 +3980,10 @@ mod test_single_token_deposit {
             &u64::MAX,
         );
 
-        assert_eq!(result.amount_used, amount_in, "all token A must be consumed");
+        assert_eq!(
+            result.amount_used, amount_in,
+            "all token A must be consumed"
+        );
         assert_eq!(result.dust, 0_i128, "no dust when price is below range");
         assert!(result.liquidity > 0, "liquidity must be positive");
     }
@@ -3469,7 +4030,10 @@ mod test_single_token_deposit {
             &u64::MAX,
         );
 
-        assert_eq!(result.amount_used, amount_in, "all token B must be consumed");
+        assert_eq!(
+            result.amount_used, amount_in,
+            "all token B must be consumed"
+        );
         assert_eq!(result.dust, 0_i128, "no dust when price is above range");
         assert!(result.liquidity > 0, "liquidity must be positive");
     }
@@ -3814,9 +4378,15 @@ mod test_single_token_deposit {
             )
             .unwrap();
 
-        assert_eq!(quote.amount_used, actual.amount_used, "quote amount_used must match actual");
+        assert_eq!(
+            quote.amount_used, actual.amount_used,
+            "quote amount_used must match actual"
+        );
         assert_eq!(quote.dust, actual.dust, "quote dust must match actual");
-        assert_eq!(quote.liquidity, actual.liquidity, "quote liquidity must match actual");
+        assert_eq!(
+            quote.liquidity, actual.liquidity,
+            "quote liquidity must match actual"
+        );
     }
 
     #[test]
@@ -3952,8 +4522,14 @@ mod test_single_token_deposit {
             )
             .unwrap();
 
-        assert!(client.is_tick_initialized(&100_i32), "lower tick must be initialised");
-        assert!(client.is_tick_initialized(&200_i32), "upper tick must be initialised");
+        assert!(
+            client.is_tick_initialized(&100_i32),
+            "lower tick must be initialised"
+        );
+        assert!(
+            client.is_tick_initialized(&200_i32),
+            "upper tick must be initialised"
+        );
     }
 
     // ── Position list tracking ────────────────────────────────────────────────
@@ -4300,8 +4876,12 @@ mod test_single_token_deposit {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &0_i128, &-200_i32, &1_i32);
@@ -4340,8 +4920,12 @@ mod test_single_token_deposit {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &0_i128, &-200_i32, &1_i32);
@@ -4364,10 +4948,13 @@ mod test_single_token_deposit {
 
         let liq = result.liquidity;
         let (burn_a, burn_b) = client.burn_position(&provider, &100_i32, &200_i32, &liq);
-        
+
         // Should return only token A (position was out of range)
         assert!(burn_a > 0, "burn should return token_a");
-        assert_eq!(burn_b, 0_i128, "burn should not return token_b for out-of-range position");
+        assert_eq!(
+            burn_b, 0_i128,
+            "burn should not return token_b for out-of-range position"
+        );
     }
 
     /// Burning an in-range single-token position returns both tokens proportionally.
@@ -4376,8 +4963,12 @@ mod test_single_token_deposit {
         let env = Env::default();
         env.mock_all_auths();
         let admin = Address::generate(&env);
-        let token_a = env.register_stellar_asset_contract_v2(admin.clone()).address();
-        let token_b = env.register_stellar_asset_contract_v2(admin.clone()).address();
+        let token_a = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let token_b = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let cl_addr = env.register_contract(None, ConcentratedLiquidity);
         let client = ConcentratedLiquidityClient::new(&env, &cl_addr);
         client.initialize(&admin, &token_a, &token_b, &0_i128, &0_i32, &1_i32);
@@ -4403,7 +4994,7 @@ mod test_single_token_deposit {
 
         let liq = result.liquidity;
         let (burn_a, burn_b) = client.burn_position(&provider, &-100_i32, &100_i32, &liq);
-        
+
         // Position was in-range, so both tokens should be returned
         assert!(burn_a > 0 || burn_b > 0, "burn should return tokens");
     }
