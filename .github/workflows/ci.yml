@@ -43,6 +43,9 @@ jobs:
       - name: Run all tests
         run: cargo test -p factory
 
+      - name: Run upgrade integration tests
+        run: cargo test -p integration-tests upgrade
+
       - name: Clippy
         run: cargo clippy -p factory --no-deps -- -D warnings
 
