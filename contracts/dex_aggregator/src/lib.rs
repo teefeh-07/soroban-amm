@@ -73,6 +73,15 @@ pub struct RouteHop {
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClPoolInfo {
+    pub pool: Address,
+    pub token_a: Address,
+    pub token_b: Address,
+    pub fee_bps: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RouteQuote {
     pub amount_out: i128,
     pub hops: Vec<RouteHop>,
@@ -82,6 +91,7 @@ pub struct RouteQuote {
 pub enum DataKey {
     Factory,
     MaxHops,
+    ClPools,
 }
 
 #[contract]
@@ -103,6 +113,38 @@ impl DexAggregator {
         env.storage()
             .instance()
             .set(&DataKey::MaxHops, &Self::DEFAULT_MAX_HOPS);
+        env.storage()
+            .instance()
+            .set(&DataKey::ClPools, &Vec::<ClPoolInfo>::new(&env));
+    }
+
+    pub fn register_cl_pool(
+        env: Env,
+        pool: Address,
+        token_a: Address,
+        token_b: Address,
+        fee_bps: i128,
+    ) {
+        let mut cl_pools: Vec<ClPoolInfo> = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClPools)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for i in 0..cl_pools.len() {
+            let entry = cl_pools.get(i).unwrap();
+            if entry.pool == pool {
+                return;
+            }
+        }
+
+        cl_pools.push_back(ClPoolInfo {
+            pool: pool.clone(),
+            token_a: token_a.clone(),
+            token_b: token_b.clone(),
+            fee_bps,
+        });
+        env.storage().instance().set(&DataKey::ClPools, &cl_pools);
     }
 
     /// Find the best route up to `max_hops` pools deep (#319).
@@ -347,6 +389,27 @@ impl DexAggregator {
             }
         }
 
+        let cl_pools = Self::registered_cl_pools(env);
+        for i in 0..cl_pools.len() {
+            let info = cl_pools.get(i).unwrap();
+            if !(Self::is_cl_pool_match(&info, token_in, token_out)) {
+                continue;
+            }
+            if let Some((out, zfo)) = Self::quote_cl(env, &info.pool, token_in, token_out, amount_in)
+            {
+                if out > best {
+                    best = out;
+                    hop = RouteHop {
+                        pool: info.pool,
+                        pool_kind: PoolKind::Cl,
+                        token_in: token_in.clone(),
+                        token_out: token_out.clone(),
+                        zero_for_one: zfo,
+                    };
+                }
+            }
+        }
+
         for fee_idx in 0..3 {
             let fee = Self::CL_FEE_TIERS[fee_idx as usize];
             if let Some(cl) = factory.get_cl_pool(token_in, token_out, &fee) {
@@ -410,7 +473,26 @@ impl DexAggregator {
             Self::push_unique(&mut tokens, info.token_a);
             Self::push_unique(&mut tokens, info.token_b);
         }
+
+        let cl_pools = Self::registered_cl_pools(env);
+        for i in 0..cl_pools.len() {
+            let info = cl_pools.get(i).unwrap();
+            Self::push_unique(&mut tokens, info.token_a.clone());
+            Self::push_unique(&mut tokens, info.token_b.clone());
+        }
         tokens
+    }
+
+    fn registered_cl_pools(env: &Env) -> Vec<ClPoolInfo> {
+        env.storage()
+            .instance()
+            .get(&DataKey::ClPools)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    fn is_cl_pool_match(info: &ClPoolInfo, token_in: &Address, token_out: &Address) -> bool {
+        (info.token_a == *token_in && info.token_b == *token_out)
+            || (info.token_a == *token_out && info.token_b == *token_in)
     }
 
     fn push_unique(vec: &mut Vec<Address>, addr: Address) {
@@ -426,8 +508,8 @@ impl DexAggregator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::Address;
+    use factory::{Factory, FactoryClient};
+    use soroban_sdk::{testutils::Address as _, Address, BytesN};
 
     #[test]
     fn test_no_route_when_uninitialized() {
@@ -438,5 +520,41 @@ mod tests {
         let b = Address::generate(&env);
         let result = agg.try_find_best_route(&a, &b, &100_i128, &3u32);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_discover_tokens_includes_registered_cl_pools() {
+        let env = Env::default();
+        let factory_addr = env.register_contract(None, Factory);
+        let factory = FactoryClient::new(&env, &factory_addr);
+        let admin = Address::generate(&env);
+        factory.initialize(&admin, &BytesN::from_array(&env, &[0u8; 32]), &BytesN::from_array(&env, &[1u8; 32]));
+
+        let agg_addr = env.register_contract(None, DexAggregator);
+        let agg = DexAggregatorClient::new(&env, &agg_addr);
+        agg.initialize(&factory_addr);
+
+        let token_a = Address::generate(&env);
+        let token_b = Address::generate(&env);
+        let cl_pool = Address::generate(&env);
+        agg.register_cl_pool(&cl_pool, &token_a, &token_b, &30_i128);
+
+        let tokens = DexAggregator::discover_tokens(&env, &factory);
+        assert_eq!(tokens.len(), 2);
+
+        let mut found_a = false;
+        let mut found_b = false;
+        for i in 0..tokens.len() {
+            let token = tokens.get(i).unwrap();
+            if token == token_a {
+                found_a = true;
+            }
+            if token == token_b {
+                found_b = true;
+            }
+        }
+
+        assert!(found_a);
+        assert!(found_b);
     }
 }
