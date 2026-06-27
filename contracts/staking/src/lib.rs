@@ -68,6 +68,8 @@ pub enum DataKey {
     ConfigMinLockDuration,
     /// Configurable max lock duration in seconds.
     ConfigMaxLockDuration,
+    /// Circuit-breaker flag; when true new stakes and claims are halted (#360).
+    Paused,
 }
 
 // ── Data structures ───────────────────────────────────────────────────────
@@ -287,6 +289,36 @@ impl Staking {
         env.events().publish((Symbol::new(&env, "rewards_added"),), (admin, amount));
     }
 
+    /// Halt new stakes and reward claims. Admin only (#360).
+    ///
+    /// Lets the admin freeze the contract (e.g. while a reward-accounting bug
+    /// is being patched). Unstaking and emergency withdrawals remain available
+    /// so stakers can always retrieve their LP tokens.
+    pub fn pause(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        assert!(admin == stored_admin, "not admin");
+        env.storage().instance().set(&DataKey::Paused, &true);
+        env.events().publish((Symbol::new(&env, "paused"),), (admin,));
+    }
+
+    /// Resume staking and claiming. Admin only (#360).
+    pub fn unpause(env: Env, admin: Address) {
+        admin.require_auth();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        assert!(admin == stored_admin, "not admin");
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events().publish((Symbol::new(&env, "unpaused"),), (admin,));
+    }
+
+    /// Whether the contract is currently paused (#360).
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false)
+    }
+
     /// Stake LP tokens without a lock (1× boost).
     pub fn stake(env: Env, staker: Address, amount: i128) {
         Self::stake_locked(env, staker, amount, 0);
@@ -301,6 +333,7 @@ impl Staking {
     /// If the staker already has a lock, the new lock must expire no earlier
     /// than the existing one (locks can only be extended, not shortened).
     pub fn stake_locked(env: Env, staker: Address, amount: i128, lock_duration_secs: u64) {
+        assert!(!Self::is_paused(env.clone()), "contract is paused");
         staker.require_auth();
         assert!(amount > 0, "amount must be positive");
 
@@ -388,6 +421,7 @@ impl Staking {
 
     /// Claim accrued rewards without unstaking.
     pub fn claim(env: Env, staker: Address) -> i128 {
+        assert!(!Self::is_paused(env.clone()), "contract is paused");
         staker.require_auth();
         Self::_claim_rewards(&env, &staker)
     }
@@ -874,5 +908,65 @@ mod tests {
         let claimed = staking.claim(&staker);
         assert_eq!(claimed, 100);
         assert_eq!(staking.pending_rewards(&staker), 0);
+    }
+
+    #[test]
+    fn test_pause_blocks_stake_and_claim() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, staker, staking) = setup(&env);
+
+        staking.stake(&staker, &1_000_i128);
+        staking.update_rewards(&admin, &100_i128);
+
+        staking.pause(&admin);
+        assert!(staking.is_paused());
+
+        // New stakes and claims are halted while paused.
+        assert!(staking.try_stake(&staker, &500_i128).is_err());
+        assert!(staking
+            .try_stake_locked(&staker, &500_i128, &MIN_LOCK_DURATION)
+            .is_err());
+        assert!(staking.try_claim(&staker).is_err());
+    }
+
+    #[test]
+    fn test_unpause_restores_operations() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, staker, staking) = setup(&env);
+
+        staking.pause(&admin);
+        assert!(staking.try_stake(&staker, &1_000_i128).is_err());
+
+        staking.unpause(&admin);
+        assert!(!staking.is_paused());
+
+        staking.stake(&staker, &1_000_i128);
+        staking.update_rewards(&admin, &100_i128);
+        assert_eq!(staking.claim(&staker), 100);
+    }
+
+    #[test]
+    fn test_unstake_works_while_paused() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, staker, staking) = setup(&env);
+
+        staking.stake(&staker, &1_000_i128);
+        staking.pause(&admin);
+
+        // Stakers must always be able to retrieve their LP tokens.
+        let (lp_returned, _) = staking.unstake(&staker, &1_000_i128);
+        assert_eq!(lp_returned, 1_000);
+    }
+
+    #[test]
+    fn test_pause_requires_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_, staker, staking) = setup(&env);
+
+        assert!(staking.try_pause(&staker).is_err());
     }
 }
